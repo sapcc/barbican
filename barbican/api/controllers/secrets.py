@@ -314,6 +314,20 @@ class SecretsController(controllers.ACLMixin):
             return False
         return True
 
+    def _is_valid_name_filter(self, name_filter):
+        filters = name_filter.split(',')
+        sorted_filters = dict()
+        try:
+            for filter in filters:
+                if sorted_filters.get('eq') or sorted_filters.get(
+                        'gte') or sorted_filters.get('lte'):
+                    return False
+                else:
+                    sorted_filters['eq'] = parse.unquote_plus(filter)
+        except ValueError:
+            return False
+        return True
+
     def _is_valid_sorting(self, sorting):
         allowed_keys = ['algorithm', 'bit_length', 'created',
                         'expiration', 'mode', 'name', 'secret_type', 'status',
@@ -381,6 +395,10 @@ class SecretsController(controllers.ACLMixin):
         for date_filter in 'created', 'updated', 'expiration':
             if kw.get(date_filter) and not self._is_valid_date_filter(
                     kw.get(date_filter)):
+                _bad_query_string_parameters()
+        for name_filter in 'name':
+            if kw.get(name_filter) and not self._is_valid_name_filter(
+                    kw.get(name_filter)):
                 _bad_query_string_parameters()
         if kw.get('sort') and not self._is_valid_sorting(kw.get('sort')):
             _bad_query_string_parameters()
