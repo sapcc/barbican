@@ -396,10 +396,8 @@ class SecretsController(controllers.ACLMixin):
             if kw.get(date_filter) and not self._is_valid_date_filter(
                     kw.get(date_filter)):
                 _bad_query_string_parameters()
-        for name_filter in 'name':
-            if kw.get(name_filter) and not self._is_valid_name_filter(
-                    kw.get(name_filter)):
-                _bad_query_string_parameters()
+        if kw.get('name') and not self._is_valid_name_filter(kw.get('name')):
+            _bad_query_string_parameters()
         if kw.get('sort') and not self._is_valid_sorting(kw.get('sort')):
             _bad_query_string_parameters()
 
