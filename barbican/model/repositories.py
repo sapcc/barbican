@@ -668,12 +668,13 @@ class SecretRepo(BaseRepo):
         """Sub-class hook: build a retrieve query."""
         utcnow = timeutils.utcnow()
 
-        expiration_filter = or_(models.Secret.expiration.is_(None),
-                                models.Secret.expiration > utcnow)
+        # Allow to fetch expired Secrets.
+        # expiration_filter = or_(models.Secret.expiration.is_(None),
+        #                        models.Secret.expiration > utcnow)
 
         query = session.query(models.Secret)
         query = query.filter_by(id=entity_id, deleted=False)
-        query = query.filter(expiration_filter)
+        # query = query.filter(expiration_filter)
         query = query.join(models.Project)
         query = query.filter(models.Project.external_id == external_project_id)
         return query
@@ -690,12 +691,13 @@ class SecretRepo(BaseRepo):
         """
 
         utcnow = timeutils.utcnow()
-        expiration_filter = or_(models.Secret.expiration.is_(None),
-                                models.Secret.expiration > utcnow)
+        # Allow to fetch expired Secrets with a given project.
+        # expiration_filter = or_(models.Secret.expiration.is_(None),
+        #                        models.Secret.expiration > utcnow)
 
         query = session.query(models.Secret).filter_by(deleted=False)
         query = query.filter(models.Secret.project_id == project_id)
-        query = query.filter(expiration_filter)
+        # query = query.filter(expiration_filter)
 
         return query
 
@@ -762,12 +764,13 @@ class SecretRepo(BaseRepo):
         session = self.get_session(session)
         try:
             utcnow = timeutils.utcnow()
-            expiration_filter = or_(models.Secret.expiration.is_(None),
-                                    models.Secret.expiration > utcnow)
+            # Allow to fetch expired Secrets without project id check.
+            # expiration_filter = or_(models.Secret.expiration.is_(None),
+            #                        models.Secret.expiration > utcnow)
 
             query = session.query(models.Secret)
             query = query.filter_by(id=entity_id, deleted=False)
-            query = query.filter(expiration_filter)
+            # query = query.filter(expiration_filter)
             entity = query.one()
         except sa_orm.exc.NoResultFound:
             entity = None
@@ -1646,13 +1649,14 @@ class CertificateAuthorityRepo(BaseRepo):
         utcnow = timeutils.utcnow()
 
         # TODO(jfwood): Performance? Is the many-to-many join needed?
-        expiration_filter = or_(
-            models.CertificateAuthority.expiration.is_(None),
-            models.CertificateAuthority.expiration > utcnow)
+        # Allow to fetch expired Secrets.
+        # expiration_filter = or_(
+        #    models.CertificateAuthority.expiration.is_(None),
+        #    models.CertificateAuthority.expiration > utcnow)
 
         query = session.query(models.CertificateAuthority)
         query = query.filter_by(id=entity_id, deleted=False)
-        query = query.filter(expiration_filter)
+        # query = query.filter(expiration_filter)
 
         return query
 
