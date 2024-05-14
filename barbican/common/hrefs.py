@@ -10,7 +10,7 @@
 #  License for the specific language governing permissions and limitations
 #  under the License.
 from barbican.common import utils
-
+import urllib.parse as urlparse
 
 def convert_resource_id_to_href(resource_slug, resource_id):
     """Convert the resource ID to a HATEOAS-style href with resource slug."""
@@ -128,6 +128,17 @@ def add_nav_hrefs(resources_name, offset, limit,
     :param total_elements: Total number of elements
     :returns: augmented dictionary with next and/or previous hrefs
     """
+    params = dict(resources_name.request.params)
+    params.pop('marker', None)
+    query = urlparse.urlencode(params)
+
+    if query:
+        resources_name = '%s?%s' % (resources_name, query)
+    if 'next_marker' in data:
+        params['marker'] = data['next_marker']
+        next_query = urlparse.urlencode(params)
+        resources_name = 'resources_name?%s' % next_query
+
     if offset > 0:
         data.update({'previous': previous_href(resources_name,
                                                offset,
