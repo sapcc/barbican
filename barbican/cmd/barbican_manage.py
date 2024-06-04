@@ -24,9 +24,9 @@ import sys
 
 from oslo_config import cfg
 from oslo_log import log as logging
-from oslo_config import cfg as oslo_cfg
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
+from sqlalchemy import text
 
 from barbican.cmd import pkcs11_kek_rewrap as pkcs11_rewrap
 from barbican.common import config
@@ -354,14 +354,14 @@ class SAPCommands(object):
     @args('--db-url', '-d', metavar='<db-url>', dest='dburl',
           help='Barbican database URL')
     @args('--old-project-id', '-o', metavar='<old-project-id>', dest='old_project_id',
-          help='The old project ID to move secrets from.')
+          help='The old project ID to move secrets from.', required=True)
     @args('--new-project-id', '-n', metavar='<new-project-id>', dest='new_project_id',
-          help='The new project ID to move secrets to.')
+          help='The new project ID to move secrets to.', required=True)
     @args('--verbose', '-V', action='store_true', dest='verbose',
           default=False, help='Show full information about the secret movement.')
     def move_secrets(self, conf, dburl=None, old_project_id=None, new_project_id=None, verbose=None):
         if dburl is None:
-            dburl = conf.sql_connection
+            dburl = CONF.sql_connection
 
         engine = create_engine(dburl)
         with engine.connect() as connection:
