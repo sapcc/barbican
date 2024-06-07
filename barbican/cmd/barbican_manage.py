@@ -357,8 +357,6 @@ class SAPCommands(object):
           help='The old project ID to move secrets from.', required=True)
     @args('--new-project-id', '-n', metavar='<new-project-id>', dest='new_project_id',
           help='The new project ID to move secrets to.', required=True)
-    @args('--verbose', '-V', action='store_true', dest='verbose',
-          default=False, help='Show full information about the secret movement.')
     def move_secrets(self, conf, dburl=None, old_project_id=None, new_project_id=None, verbose=None):
         if dburl is None:
             dburl = CONF.sql_connection
@@ -368,9 +366,7 @@ class SAPCommands(object):
             try:
                 query = text("UPDATE secrets SET project_id = :new_project_id WHERE project_id = :old_project_id")
                 connection.execute(query, new_project_id=new_project_id, old_project_id=old_project_id)
-                print("All secrets associated with old project ID moved to new project ID.")
-                if verbose:
-                    print(f"Moved secrets from project ID {old_project_id} to {new_project_id}.")
+                print(f"Moved secrets from project ID {old_project_id} to {new_project_id}.")                    
             except Exception as e:
                 print(f"An error occurred: {e}")
 
