@@ -144,6 +144,7 @@ CKM_AES_GCM = 0x1087
 CKM_AES_KEY_WRAP = 0x1090
 CKM_GENERIC_SECRET_KEY_GEN = 0x350
 VENDOR_SAFENET_CKM_AES_GCM = 0x8000011c
+VENDOR_THALES_CKM_AES_KWP = 0x80000171
 
 # nCipher Vendor-defined Mechanisms
 CKM_NC_SHA256_HMAC_KEY_GEN = 0xDE436997
@@ -172,6 +173,11 @@ CKM_NAMES = dict()
 CKM_NAMES.update(_ENCRYPTION_MECHANISMS)
 CKM_NAMES.update(_KEY_GEN_MECHANISMS)
 CKM_NAMES.update(_KEY_WRAP_MECHANISMS)
+
+_WRAP_KEY_MECHANISMS = {
+    'CKM_AES_CBC_PAD': CKM_AES_CBC_PAD,
+    'VENDOR_THALES_CKM_AES_KWP': VENDOR_THALES_CKM_AES_KWP,
+}
 
 ERROR_CODES = {
     1: 'CKR_CANCEL',
@@ -431,7 +437,9 @@ class PKCS11(object):
                  ffi=None, algorithm=None,
                  seed_random_buffer=None,
                  generate_iv=None, always_set_cka_sensitive=None,
+                 always_set_cka_token=None,
                  hmac_keywrap_mechanism='CKM_SHA256_HMAC',
+                 wrap_key_mechanism='CKM_AES_CBC_PAD',
                  token_serial_number=None,
                  token_labels=None,
                  os_locking_ok=False):
@@ -477,7 +485,9 @@ class PKCS11(object):
         self.gcmtagsize = 16
         self.generate_iv = generate_iv
         self.always_set_cka_sensitive = always_set_cka_sensitive
+        self.always_set_cka_token = always_set_cka_token
         self.hmac_keywrap_mechanism = CKM_NAMES[hmac_keywrap_mechanism]
+        self.wrap_key_mechanism = _WRAP_KEY_MECHANISMS[wrap_key_mechanism]
 
         # Validate configuration and RNG
         session = self.get_session()
@@ -737,7 +747,8 @@ class PKCS11(object):
         if master_key and not key_label:
             raise ValueError(u._("key_label must be set for master_keys"))
 
-        token = master_key
+        # in Thales HSMs the cka token is required to be True
+        token = self.always_set_cka_token or master_key
         extractable = not master_key
         # in some HSMs extractable keys cannot be marked sensitive
         sensitive = self.always_set_cka_sensitive or not extractable
@@ -757,7 +768,7 @@ class PKCS11(object):
             Attribute(CKA_UNWRAP, wrap),
             Attribute(CKA_EXTRACTABLE, extractable)
         ]
-        if master_key:
+        if master_key or key_label:
             ck_attributes.append(Attribute(CKA_LABEL, key_label))
         ck_attributes = self._build_attributes(ck_attributes)
         mech = self.ffi.new("CK_MECHANISM *")
@@ -775,7 +786,7 @@ class PKCS11(object):
 
     def wrap_key(self, wrapping_key, key_to_wrap, session):
         mech = self.ffi.new("CK_MECHANISM *")
-        mech.mechanism = CKM_AES_CBC_PAD
+        mech.mechanism = self.wrap_key_mechanism
         iv = self._generate_random(16, session)
         mech.parameter = iv
         mech.parameter_len = 16
@@ -806,7 +817,7 @@ class PKCS11(object):
         ck_wrapped_key = self.ffi.new("CK_BYTE[]", wrapped_key)
         unwrapped_key = self.ffi.new("CK_OBJECT_HANDLE *")
         mech = self.ffi.new("CK_MECHANISM *")
-        mech.mechanism = CKM_AES_CBC_PAD
+        mech.mechanism = self.wrap_key_mechanism
         mech.parameter = ck_iv
         mech.parameter_len = len(iv)
 
