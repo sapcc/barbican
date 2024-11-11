@@ -25,9 +25,6 @@ import sys
 from oslo_config import cfg
 from oslo_log import log as logging
 
-from sqlalchemy import create_engine
-from sqlalchemy import text
-
 from barbican.cmd import pkcs11_kek_rewrap as pkcs11_rewrap
 from barbican.common import config
 from barbican.model import clean
@@ -329,13 +326,16 @@ class HSMCommands(object):
         elif type(slotid) is not int:
             slotid = int(slotid)
         if hmacwrap is None:
-            hmacwrap = conf.p11_crypto_plugin.hmac_keywrap_mechanism
+            hmacwrap = conf.p11_crypto_plugin.hmac_mechanism
 
         self.pkcs11 = pkcs11.PKCS11(
-            library_path=libpath, login_passphrase=passphrase,
-            rw_session=True, slot_id=slotid,
-            encryption_mechanism='CKM_AES_CBC',
-            hmac_keywrap_mechanism=hmacwrap,
+            library_path=libpath,
+            login_passphrase=passphrase,
+            rw_session=conf.p11_crypto_plugin.rw_session,
+            slot_id=slotid,
+            encryption_mechanism=conf.p11_crypto_plugin.encryption_mechanism,
+            hmac_mechanism=hmacwrap,
+            key_wrap_mechanism=conf.p11_crypto_plugin.key_wrap_mechanism,
             token_serial_number=conf.p11_crypto_plugin.token_serial_number,
             token_labels=conf.p11_crypto_plugin.token_labels
         )
@@ -347,34 +347,10 @@ class HSMCommands(object):
             print("The label {label} already exists!".format(label=label))
             sys.exit(1)
 
-class SAPCommands(object):
-
-    description = "Move all secrets associated with the old_project_id to the new_project_id."
-
-    @args('--db-url', '-d', metavar='<db-url>', dest='dburl',
-          help='Barbican database URL')
-    @args('--old-project-id', '-o', metavar='<old-project-id>', dest='old_project_id',
-          help='The old project ID to move secrets from.', required=True)
-    @args('--new-project-id', '-n', metavar='<new-project-id>', dest='new_project_id',
-          help='The new project ID to move secrets to.', required=True)
-    def move_secrets(self, conf, dburl=None, old_project_id=None, new_project_id=None, verbose=None):
-        if dburl is None:
-            dburl = CONF.sql_connection
-
-        engine = create_engine(dburl)
-        with engine.connect() as connection:
-            try:
-                query = text("UPDATE secrets SET project_id = :new_project_id WHERE project_id = :old_project_id")
-                connection.execute(query, new_project_id=new_project_id, old_project_id=old_project_id)
-                print(f"Moved secrets from project ID {old_project_id} to {new_project_id}.")                    
-            except Exception as e:
-                print(f"An error occurred: {e}")
-
 
 CATEGORIES = {
     'db': DbCommands,
     'hsm': HSMCommands,
-    'sap': SAPCommands,
 }
 
 
