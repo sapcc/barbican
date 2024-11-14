@@ -13,7 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import base64
 import builtins
+import collections
+import os
 from unittest import mock
 
 from barbican.common import exception as ex
@@ -23,6 +26,10 @@ from barbican.plugin.crypto import p11_crypto
 from barbican.plugin.crypto import pkcs11
 from barbican.tests import utils
 
+
+FakeKEKMetaDTO = collections.namedtuple(
+    'FakeKEKMetaDTO', 'kek_label, plugin_meta'
+)
 
 def generate_random_effect(length, session):
     return b'0' * length
@@ -363,3 +370,23 @@ class WhenTestingP11CryptoPlugin(utils.BaseTestCase):
 
     def test_get_plugin_name(self):
         self.assertEqual(self.plugin_name, self.plugin.get_plugin_name())
+
+    def test_load_kek_from_meta_dto_no_key_wrap_mechanism(self):
+        key = base64.b64encode(os.urandom(32)).decode('UTF-8')
+        hmac = base64.b64encode(os.urandom(16)).decode('UTF-8')
+        fake_dto = FakeKEKMetaDTO('test_kek', p11_crypto.json_dumps_compact({
+            'iv': None,
+            'wrapped_key': key,
+            'hmac': hmac,
+            'mkek_label': 'test_mkek',
+            'hmac_label': 'test_hmac'
+        }))
+        load_mock = mock.MagicMock()
+        self.plugin._load_kek = load_mock
+
+        self.plugin._load_kek_from_meta_dto(fake_dto)
+
+        # key_wrap_mechanism should default to 'CKM_AES_CBC_PAD'
+        load_mock.assert_called_with(
+            'test_kek', None, key, hmac,
+            'test_mkek', 'test_hmac', 'CKM_AES_CBC_PAD')
