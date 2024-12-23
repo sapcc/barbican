@@ -365,7 +365,6 @@ class SecretsController(controllers.ACLMixin):
     @controllers.enforce_rbac('secrets:get')
     def on_get(self, external_project_id, **kw):
         no_consumers = versions.is_supported(pecan.request, max_version='1.0')
-        # NOTE(xek): consumers are being introduced in 1.1
 
         def secret_fields(field):
             resp = putil.mime_types.augment_fields_with_content_types(field)
@@ -373,37 +372,51 @@ class SecretsController(controllers.ACLMixin):
                 del resp['consumers']
             return resp
 
-        LOG.debug('Start secrets on_get '
-                  'for project-ID %s:', external_project_id)
+        LOG.debug('Start secrets on_get for project-ID %s:', external_project_id)
 
         name = kw.get('name', '')
         if name:
             name = parse.unquote_plus(name)
 
+        # Ensure offset and limit are properly cast to integers
+        offset = kw.get('offset', 0)
+        if isinstance(offset, list):
+            offset = offset[0]
+        try:
+            offset = int(offset)
+        except ValueError:
+            offset = 0  # Default to 0 if invalid
+
+        limit = kw.get('limit', 10)
+        if isinstance(limit, list):
+            limit = limit[0]
+        try:
+            limit = int(limit)
+        except ValueError:
+            limit = 10
+
         bits = kw.get('bits', 0)
         try:
             bits = int(bits)
         except ValueError:
-            # as per Github issue 171, if bits is invalid then
-            # the default should be used.
             bits = 0
 
-        for date_filter in 'created', 'updated', 'expiration':
-            if kw.get(date_filter) and not self._is_valid_date_filter(
-                    kw.get(date_filter)):
+        # Validate date filters
+        for date_filter in ['created', 'updated', 'expiration']:
+            if kw.get(date_filter) and not self._is_valid_date_filter(kw.get(date_filter)):
                 _bad_query_string_parameters()
         if kw.get('sort') and not self._is_valid_sorting(kw.get('sort')):
             _bad_query_string_parameters()
 
+        # Context and user information
         ctxt = controllers._get_barbican_context(pecan.request)
-        user_id = None
-        if ctxt:
-            user_id = ctxt.user_id
+        user_id = ctxt.user_id if ctxt else None
 
+        # Fetch secrets from the repository
         result = self.secret_repo.get_secret_list(
             external_project_id,
-            offset_arg=kw.get('offset', 0),
-            limit_arg=kw.get('limit'),
+            offset_arg=offset,
+            limit_arg=limit,
             name=name,
             alg=kw.get('alg'),
             mode=kw.get('mode'),
@@ -421,21 +434,41 @@ class SecretsController(controllers.ACLMixin):
         secrets, offset, limit, total = result
 
         if not secrets:
-            secrets_resp_overall = {'secrets': [],
-                                    'total': total}
+            secrets_resp_overall = {'secrets': [], 'total': total}
         else:
             secrets_resp = [
                 hrefs.convert_to_hrefs(secret_fields(s))
                 for s in secrets
             ]
-            secrets_resp_overall = hrefs.add_nav_hrefs(
-                'secrets', offset, limit, total,
-                {'secrets': secrets_resp}
-            )
-            secrets_resp_overall.update({'total': total})
 
-        LOG.info('Retrieved secret list for project: %s',
-                 external_project_id)
+            # Preserve query parameters for pagination
+            base_url = pecan.request.path_url
+            query_params = pecan.request.params.mixed()
+
+            # Construct next URL
+            if offset + limit < total:
+                next_params = query_params.copy()
+                next_params['offset'] = offset + limit
+                next_url = f"{base_url}?{parse.urlencode(next_params)}"
+            else:
+                next_url = None
+
+            # Construct previous URL
+            if offset > 0:
+                prev_params = query_params.copy()
+                prev_params['offset'] = max(offset - limit, 0)
+                prev_url = f"{base_url}?{parse.urlencode(prev_params)}"
+            else:
+                prev_url = None
+
+            secrets_resp_overall = {
+                'secrets': secrets_resp,
+                'total': total,
+                'next': next_url,
+                'previous': prev_url
+            }
+
+        LOG.info('Retrieved secret list for project: %s', external_project_id)
         return secrets_resp_overall
 
     @index.when(method='POST', template='json')
