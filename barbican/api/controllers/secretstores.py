@@ -215,3 +215,54 @@ class SecretStoresController(controllers.ACLMixin):
 
         return convert_secret_store_to_response_format(
             project_store.secret_store)
+        
+    @expose(generic=True, template='json')
+    @handle_exceptions(u._('Creating a new secret store'))
+    @enforce_rbac('secretstores:post')
+    def on_post(self, external_project_id, **kwargs):
+        """
+        Create a new secret store.
+
+        Payload should include:
+        {
+            "name": "store name",
+            "store_plugin": "plugin_name",
+            "store_meta": { "key": "value", ... }
+        }
+        """
+        LOG.debug("Start: Create a new secret store")
+
+        if not utils.is_multiple_backends_enabled():
+            abort(400, u._('Multiple backends support is not enabled'))
+
+        # Parse and validate request payload
+        if not kwargs:
+            abort(400, u._('Invalid request payload'))
+
+        name = kwargs.get('name')
+        store_plugin = kwargs.get('store_plugin')
+        store_meta = kwargs.get('store_meta', {})
+
+        if not name or not store_plugin:
+            abort(400, u._('Name and store_plugin are required fields'))
+
+        # Create the secret store
+        new_store = self.secret_stores_repo.create(
+            name=name,
+            store_plugin=store_plugin,
+            store_meta=store_meta,
+        )
+
+        LOG.info(f"Secret store '{name}' created successfully with ID {new_store.id}")
+
+        # Format and return response
+        response.status = 201
+        return {
+            'secret_store': {
+                'id': new_store.id,
+                'name': new_store.name,
+                'store_plugin': new_store.store_plugin,
+                'store_meta': new_store.store_meta,
+                'created_at': new_store.created_at,
+            }
+        }
