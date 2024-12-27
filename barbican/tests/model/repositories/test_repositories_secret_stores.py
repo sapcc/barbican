@@ -145,7 +145,7 @@ class WhenTestingSecretStoresRepo(database_utils.RepositoryTestCase):
         crypto_plugin = 'second_crypto'
         self._create_secret_store(name, store_plugin, crypto_plugin, False)
         self.assertRaises(exception.ConstraintCheck, self._create_secret_store,
-                          "thrid_name", store_plugin, crypto_plugin, False)
+                          "third_name", store_plugin, crypto_plugin, False)
 
     def test_should_raise_constraint_for_same_names(self):
         """Check for secret store 'name' uniqueness"""
