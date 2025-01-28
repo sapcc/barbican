@@ -1665,6 +1665,57 @@ class ProjectSecretStore(BASE, ModelBase):
                 'project_id': self.project_id}
 
 
+class HSMPartitionConfig(BASE, ModelBase):
+    """Stores HSM partition configurations."""
+    __tablename__ = 'hsm_partition_configs'
+    
+    id = sa.Column(sa.String(36), primary_key=True)
+    created_at = sa.Column(sa.DateTime, nullable=False)
+    updated_at = sa.Column(sa.DateTime, nullable=False)
+    
+    # Link to project
+    project_id = sa.Column(sa.String(36), 
+                          sa.ForeignKey('projects.id'), 
+                          nullable=False)
+    
+    # HSM partition details
+    slot_id = sa.Column(sa.String(255), nullable=False)
+    token_label = sa.Column(sa.String(255), nullable=False)
+    partition_label = sa.Column(sa.String(255), nullable=False)
+    
+    # Encrypted credentials stored as JSON
+    credentials = sa.Column(types.JsonBlob(), nullable=False)
+    
+    # Partition metadata
+    metadata = sa.Column(types.JsonBlob(), nullable=True)
+    
+    # Status
+    status = sa.Column(sa.String(20), nullable=False)
+    
+    # Relationship to Project
+    project = relationship("Project", backref=backref("hsm_partitions"))
+
+class HSMPartitionSecret(ModelBase):
+    """Links secrets to specific HSM partitions."""
+    __tablename__ = 'hsm_partition_secrets'
+
+    id = sa.Column(sa.String(36), primary_key=True)
+    created_at = sa.Column(sa.DateTime, nullable=False)
+    
+    secret_id = sa.Column(sa.String(36), 
+                         sa.ForeignKey('secrets.id'), 
+                         nullable=False)
+    partition_id = sa.Column(sa.String(36), 
+                           sa.ForeignKey('hsm_partition_configs.id'), 
+                           nullable=False)
+    
+    # Reference to key in HSM (if applicable)
+    hsm_key_label = sa.Column(sa.String(255), nullable=True)
+    
+    # Relationships
+    secret = relationship("Secret", backref=backref("hsm_partition"))
+    partition = relationship("HSMPartitionConfig")
+
 class SecretConsumerMetadatum(BASE, SoftDeleteMixIn, ModelBase):
     """Stores Consumer Registrations for Secrets in the datastore.
 

@@ -2380,6 +2380,51 @@ class ProjectSecretStoreRepo(BaseRepo):
         return session.query(models.ProjectSecretStore).filter_by(
             project_id=project_id)
 
+# TODO: Implement and test this
+class HSMPartitionConfigRepo(BaseRepo):
+    """Repository for HSM partition configurations."""
+    def _do_entity_name(self):
+        """Sub-class hook: return entity name, such as for debugging."""
+        return "HSMPartition"
+
+    def get_by_id(self, entity_id, session=None):
+        """Get partition config by ID."""
+        session = self.get_session(session)
+        
+        try:
+            query = session.query(models.HSMPartitionConfig)
+            query = query.filter_by(id=entity_id)
+            entity = query.one()
+        
+        except sa_orm.exc.NoResultFound:
+            if not suppress_exception:
+                LOG.exception("Problem getting HSM Partition ID %s",
+                              entity_id)
+                raise exception.NotFound(u._(
+                    "No {entity_name} found with ID {id}").format(
+                        entity_name=self._do_entity_name(),
+                        id=entity_id))
+
+        return entity
+
+
+        return query.filter_by(id=entity_id).first()
+
+    def get_by_project_id(self, project_id, session=None):
+        """Get all partition configs for a project."""
+        pass
+
+    def create_from(self, entity):
+        """Create new partition entity."""
+        pass
+
+    def save(self, entity):
+        """Save partition entity updates."""
+        pass
+
+    def delete_entity_by_id(self, entity_id, session=None):
+        """Delete partition config."""
+        pass
 
 class SecretConsumerRepo(BaseRepo):
     """Repository for the SecretConsumer entity."""
