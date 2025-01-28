@@ -1684,16 +1684,16 @@ class HSMPartitionConfig(BASE, ModelBase):
     partition_label = sa.Column(sa.String(255), nullable=False)
     
     # Encrypted credentials stored as JSON
-    credentials = sa.Column(types.JsonBlob(), nullable=False)
+    credentials = sa.Column(JsonBlob(), nullable=False)
     
     # Partition metadata
-    metadata = sa.Column(types.JsonBlob(), nullable=True)
+    partition_metadata = sa.Column(JsonBlob(), nullable=True)
     
     # Status
     status = sa.Column(sa.String(20), nullable=False)
     
     # Relationship to Project
-    project = relationship("Project", backref=backref("hsm_partitions"))
+    project = orm.relationship("Project")
 
 class HSMPartitionSecret(ModelBase):
     """Links secrets to specific HSM partitions."""
@@ -1713,8 +1713,8 @@ class HSMPartitionSecret(ModelBase):
     hsm_key_label = sa.Column(sa.String(255), nullable=True)
     
     # Relationships
-    secret = relationship("Secret", backref=backref("hsm_partition"))
-    partition = relationship("HSMPartitionConfig")
+    secret = orm.relationship("Secret")
+    partition = orm.relationship("HSMPartitionConfig")
 
 class SecretConsumerMetadatum(BASE, SoftDeleteMixIn, ModelBase):
     """Stores Consumer Registrations for Secrets in the datastore.
