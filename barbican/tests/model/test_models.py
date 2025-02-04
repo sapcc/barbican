@@ -762,24 +762,26 @@ class WhenCreatingNewProjectHSMPartition(utils.BaseTestCase):
 
         self.assertEqual(self.project_id, project_partition.project_id)
         self.assertEqual(self.partition_id, project_partition.partition_id)
-        # TODO: Remove once it's activated
-        # self.assertEqual(models.States.ACTIVE, project_partition.status)
+        self.assertEqual(models.States.ACTIVE, project_partition.status)
 
+
+    # TODO: Fix this
     def test_should_throw_exception_missing_project_id(self):
         """Test that missing project_id raises exception."""
         self.assertRaises(
             exception.MissingArgumentError,
             models.ProjectHSMPartition,
-            None,
-            self.partition_id
+            project_id=None,
+            partition_id=self.partition_id
         )
         self.assertRaises(
             exception.MissingArgumentError, 
             models.ProjectHSMPartition,
-            "",
-            self.partition_id
+            project_id="",
+            partition_id=self.partition_id
         )
 
+    # TODO: Fix this
     def test_should_throw_exception_missing_partition_id(self):
         """Test that missing partition_id raises exception."""
         self.assertRaises(

@@ -1726,6 +1726,7 @@ class ProjectHSMPartition(BASE, ModelBase):
         sa.ForeignKey('projects.id'),
         index=True,
         nullable=False)
+
     partition_id = sa.Column(
         sa.String(36), 
         sa.ForeignKey('hsm_partition_configs.id'),
@@ -1739,6 +1740,30 @@ class ProjectHSMPartition(BASE, ModelBase):
         sa.UniqueConstraint(
             'project_id', name='_project_hsm_partition_uc'),
     )
+
+    def __init__(self, project_id=None, partition_id=None, check_exc=True):
+        """Initialize mapping."""
+        super(ProjectHSMPartition, self).__init__()
+
+        msg = u._("Must supply non-None {0} argument for ProjectHSMPartition entry.")
+
+        if project_id is None and check_exc:
+            raise exception.MissingArgumentError(msg.format("project_id"))
+        self.project_id = project_id
+
+        if partition_id is None and check_exc:
+            raise exception.MissingArgumentError(msg.format("partition_id")) 
+        self.partition_id = partition_id
+
+        self.status = States.ACTIVE
+
+    def _do_extra_dict_fields(self):
+        """Return dict of fields."""
+        return {
+            'project_id': self.project_id,
+            'partition_id': self.partition_id
+        }
+
 
 class SecretConsumerMetadatum(BASE, SoftDeleteMixIn, ModelBase):
     """Stores Consumer Registrations for Secrets in the datastore.
