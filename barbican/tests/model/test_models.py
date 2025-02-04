@@ -747,6 +747,66 @@ class WhenCreatingNewProjectSecretStore(utils.BaseTestCase):
                          project_ss.to_dict_fields()['status'])
 
 
+class WhenCreatingNewProjectHSMPartition(utils.BaseTestCase):
+    def setUp(self):
+        super(WhenCreatingNewProjectHSMPartition, self).setUp()
+        self.project_id = '12345'
+        self.partition_id = '67890'
+
+    def test_create_new_project_hsm_partition(self):
+        """Test basic creation of ProjectHSMPartition."""
+        project_partition = models.ProjectHSMPartition(
+            project_id=self.project_id,
+            partition_id=self.partition_id
+        )
+
+        self.assertEqual(self.project_id, project_partition.project_id)
+        self.assertEqual(self.partition_id, project_partition.partition_id)
+        # TODO: Remove once it's activated
+        # self.assertEqual(models.States.ACTIVE, project_partition.status)
+
+    def test_should_throw_exception_missing_project_id(self):
+        """Test that missing project_id raises exception."""
+        self.assertRaises(
+            exception.MissingArgumentError,
+            models.ProjectHSMPartition,
+            None,
+            self.partition_id
+        )
+        self.assertRaises(
+            exception.MissingArgumentError, 
+            models.ProjectHSMPartition,
+            "",
+            self.partition_id
+        )
+
+    def test_should_throw_exception_missing_partition_id(self):
+        """Test that missing partition_id raises exception."""
+        self.assertRaises(
+            exception.MissingArgumentError,
+            models.ProjectHSMPartition,
+            self.project_id,
+            None
+        )
+        self.assertRaises(
+            exception.MissingArgumentError,
+            models.ProjectHSMPartition,
+            self.project_id,
+            ""
+        )
+
+    def test_to_dict_fields(self):
+        """Test that to_dict_fields returns correct fields."""
+        project_partition = models.ProjectHSMPartition(
+            project_id=self.project_id,
+            partition_id=self.partition_id
+        )
+        fields = project_partition.to_dict_fields()
+
+        self.assertEqual(self.project_id, fields['project_id'])
+        self.assertEqual(self.partition_id, fields['partition_id']) 
+        self.assertEqual(models.States.ACTIVE, fields['status'])
+
 class WhenCreatingNewSecretConsumer(utils.BaseTestCase):
     def setUp(self):
         super(WhenCreatingNewSecretConsumer, self).setUp()
