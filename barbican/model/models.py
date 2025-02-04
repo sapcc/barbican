@@ -1716,6 +1716,30 @@ class HSMPartitionSecret(ModelBase):
     secret = orm.relationship("Secret")
     partition = orm.relationship("HSMPartitionConfig")
 
+
+class ProjectHSMPartition(BASE, ModelBase):
+    """Associates projects with their HSM partition configuration."""
+    __tablename__ = 'project_hsm_partitions'
+
+    project_id = sa.Column(
+        sa.String(36),
+        sa.ForeignKey('projects.id'),
+        index=True,
+        nullable=False)
+    partition_id = sa.Column(
+        sa.String(36), 
+        sa.ForeignKey('hsm_partition_configs.id'),
+        index=True,
+        nullable=False)
+
+    project = orm.relationship('Project')
+    partition = orm.relationship('HSMPartitionConfig')
+
+    __table_args__ = (
+        sa.UniqueConstraint(
+            'project_id', name='_project_hsm_partition_uc'),
+    )
+
 class SecretConsumerMetadatum(BASE, SoftDeleteMixIn, ModelBase):
     """Stores Consumer Registrations for Secrets in the datastore.
 
