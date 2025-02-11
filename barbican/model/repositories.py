@@ -58,6 +58,7 @@ _CONTAINER_CONSUMER_REPOSITORY = None
 _CONTAINER_REPOSITORY = None
 _CONTAINER_SECRET_REPOSITORY = None
 _ENCRYPTED_DATUM_REPOSITORY = None
+_HSM_PARTITION_REPOSITORY = None
 _KEK_DATUM_REPOSITORY = None
 _ORDER_PLUGIN_META_REPOSITORY = None
 _ORDER_BARBICAN_META_REPOSITORY = None
@@ -2699,6 +2700,10 @@ def get_encrypted_datum_repository():
     global _ENCRYPTED_DATUM_REPOSITORY
     return _get_repository(_ENCRYPTED_DATUM_REPOSITORY, EncryptedDatumRepo)
 
+def get_hsm_partition_repository():
+    """Returns a singleton HSMPartitionConfig repository instance."""
+    global _HSM_PARTITION_REPOSITORY
+    return _get_repository(_HSM_PARTITION_REPOSITORY, HSMPartitionConfigRepo)
 
 def get_kek_datum_repository():
     """Returns a singleton KEK Datum repository instance."""
