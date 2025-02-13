@@ -1,0 +1,36 @@
+#!/usr/bin/env python3
+import os
+from paste import deploy
+from paste import httpserver
+from barbican.common import config
+from oslo_config import cfg
+
+def run():
+    # Use an absolute path to the config directory
+    prop_dir = os.environ.get('BARBICAN_CONFIG_DIR', os.path.expanduser('~/barbican/etc/barbican'))
+    
+    # Construct paths for both config files
+    paste_config_path = os.path.join(prop_dir, 'barbican-api-paste.ini')
+    barbican_config_path = os.path.join(prop_dir, 'barbican.conf')
+    
+    # Initialize and load Barbican config
+    CONF = cfg.CONF
+    
+    # Add debug prints
+    print(f"Checking if config exists: {os.path.exists(barbican_config_path)}")
+    
+    # Force the config file to be loaded
+    CONF([], default_config_files=[barbican_config_path])
+    
+    # Print loaded configuration
+    print(f"Actual config file used: {CONF.config_file}")
+    
+    application = deploy.loadapp(
+        f'config:{paste_config_path}',
+        name='main'
+    )
+    
+    httpserver.serve(application, host='0.0.0.0', port='9311')
+
+if __name__ == '__main__':
+    run()

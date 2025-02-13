@@ -1672,6 +1672,7 @@ class HSMPartitionConfig(BASE, ModelBase):
     id = sa.Column(sa.String(36), primary_key=True)
     created_at = sa.Column(sa.DateTime, nullable=False)
     updated_at = sa.Column(sa.DateTime, nullable=False)
+    deleted_at = sa.Column(sa.DateTime, nullable=True)
     
     # Link to project
     project_id = sa.Column(sa.String(36), 
