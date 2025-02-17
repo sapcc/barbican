@@ -16,6 +16,8 @@
 import datetime
 import unittest
 
+from oslo_utils import timeutils
+
 from barbican.common import exception
 from barbican.model import models
 from barbican.plugin.interface import secret_store
@@ -36,7 +38,7 @@ class WhenCreatingNewSecret(utils.BaseTestCase):
         self.parsed_order = {'secret': self.parsed_secret}
 
     def test_new_secret_is_created_from_dict(self):
-        date_time = datetime.datetime.utcnow().isoformat()
+        date_time = timeutils.utcnow().isoformat()
         self.parsed_secret['expiration'] = date_time
         secret = models.Secret(self.parsed_secret)
         self.assertEqual(self.parsed_secret['name'], secret.name)
@@ -57,7 +59,7 @@ class WhenCreatingNewSecret(utils.BaseTestCase):
 
     def test_new_secret_is_created_with_default_secret_type(self):
         secret_spec = dict(self.parsed_secret)
-        date_time = datetime.datetime.utcnow().isoformat()
+        date_time = timeutils.utcnow().isoformat()
         secret_spec['expiration'] = date_time
         del secret_spec['secret_type']
         secret = models.Secret(secret_spec)
@@ -267,7 +269,7 @@ class WhenCreatingOrderRetryTask(utils.BaseTestCase):
             'sub_status': 'Pending',
             'sub_status_message': 'Waiting for instructions...'
         })
-        at = datetime.datetime.utcnow()
+        at = timeutils.utcnow()
         order_retry_task = models.OrderRetryTask()
         order_retry_task.order_id = order.id
         order_retry_task.retry_task = "foobar"
@@ -291,8 +293,7 @@ class WhenCreatingOrderRetryTask(utils.BaseTestCase):
 class WhenCreatingNewCertificateAuthority(utils.BaseTestCase):
     def setUp(self):
         super(WhenCreatingNewCertificateAuthority, self).setUp()
-        expiration = (datetime.datetime.utcnow() +
-                      datetime.timedelta(minutes=10))
+        expiration = timeutils.utcnow() + datetime.timedelta(minutes=10)
         self.parsed_ca = {'plugin_name': 'dogtag_plugin',
                           'plugin_ca_id': 'ca_master',
                           'expiration': expiration.isoformat(),
@@ -324,8 +325,7 @@ class WhenCreatingNewCertificateAuthority(utils.BaseTestCase):
 class WhenCreatingNewProjectCertificateAuthority(utils.BaseTestCase):
     def setUp(self):
         super(WhenCreatingNewProjectCertificateAuthority, self).setUp()
-        expiration = (datetime.datetime.utcnow() +
-                      datetime.timedelta(minutes=10))
+        expiration = timeutils.utcnow() + datetime.timedelta(minutes=10)
         self.parsed_ca = {'plugin_name': 'dogtag_plugin',
                           'plugin_ca_id': 'ca_master',
                           'expiration': expiration.isoformat(),
@@ -348,8 +348,7 @@ class WhenCreatingNewProjectCertificateAuthority(utils.BaseTestCase):
 class WhenCreatingNewPreferredCertificateAuthority(utils.BaseTestCase):
     def setUp(self):
         super(WhenCreatingNewPreferredCertificateAuthority, self).setUp()
-        expiration = (datetime.datetime.utcnow() +
-                      datetime.timedelta(minutes=10))
+        expiration = timeutils.utcnow() + datetime.timedelta(minutes=10)
         self.parsed_ca = {'plugin_name': 'dogtag_plugin',
                           'plugin_ca_id': 'ca_master',
                           'expiration': expiration.isoformat(),
@@ -747,6 +746,68 @@ class WhenCreatingNewProjectSecretStore(utils.BaseTestCase):
         self.assertEqual(models.States.ACTIVE,
                          project_ss.to_dict_fields()['status'])
 
+
+class WhenCreatingNewProjectHSMPartition(utils.BaseTestCase):
+    def setUp(self):
+        super(WhenCreatingNewProjectHSMPartition, self).setUp()
+        self.project_id = '12345'
+        self.partition_id = '67890'
+
+    def test_create_new_project_hsm_partition(self):
+        """Test basic creation of ProjectHSMPartition."""
+        project_partition = models.ProjectHSMPartition(
+            project_id=self.project_id,
+            partition_id=self.partition_id
+        )
+
+        self.assertEqual(self.project_id, project_partition.project_id)
+        self.assertEqual(self.partition_id, project_partition.partition_id)
+        self.assertEqual(models.States.ACTIVE, project_partition.status)
+
+
+    # TODO: Fix this
+    def test_should_throw_exception_missing_project_id(self):
+        """Test that missing project_id raises exception."""
+        self.assertRaises(
+            exception.MissingArgumentError,
+            models.ProjectHSMPartition,
+            project_id=None,
+            partition_id=self.partition_id
+        )
+        self.assertRaises(
+            exception.MissingArgumentError, 
+            models.ProjectHSMPartition,
+            project_id="",
+            partition_id=self.partition_id
+        )
+
+    # TODO: Fix this
+    def test_should_throw_exception_missing_partition_id(self):
+        """Test that missing partition_id raises exception."""
+        self.assertRaises(
+            exception.MissingArgumentError,
+            models.ProjectHSMPartition,
+            self.project_id,
+            None
+        )
+        self.assertRaises(
+            exception.MissingArgumentError,
+            models.ProjectHSMPartition,
+            self.project_id,
+            ""
+        )
+
+    def test_to_dict_fields(self):
+        """Test that to_dict_fields returns correct fields."""
+        project_partition = models.ProjectHSMPartition(
+            project_id=self.project_id,
+            partition_id=self.partition_id
+        )
+        fields = project_partition.to_dict_fields()
+
+        self.assertEqual(self.project_id, fields['project_id'])
+        self.assertEqual(self.partition_id, fields['partition_id']) 
+        self.assertEqual(models.States.ACTIVE, fields['status'])
 
 class WhenCreatingNewSecretConsumer(utils.BaseTestCase):
     def setUp(self):

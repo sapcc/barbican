@@ -58,6 +58,7 @@ _CONTAINER_CONSUMER_REPOSITORY = None
 _CONTAINER_REPOSITORY = None
 _CONTAINER_SECRET_REPOSITORY = None
 _ENCRYPTED_DATUM_REPOSITORY = None
+_HSM_PARTITION_REPOSITORY = None
 _KEK_DATUM_REPOSITORY = None
 _ORDER_PLUGIN_META_REPOSITORY = None
 _ORDER_BARBICAN_META_REPOSITORY = None
@@ -2380,6 +2381,130 @@ class ProjectSecretStoreRepo(BaseRepo):
         return session.query(models.ProjectSecretStore).filter_by(
             project_id=project_id)
 
+# TODO: Implement and test this
+class HSMPartitionConfigRepo(BaseRepo):
+    """Repository for HSM partition configurations."""
+    def _do_entity_name(self):
+        """Sub-class hook: return entity name, such as for debugging."""
+        return "HSMPartition"
+
+    def get_by_id(self, entity_id, session=None):
+        """Get partition config by ID."""
+        session = self.get_session(session)
+        
+        try:
+            query = session.query(models.HSMPartitionConfig)
+            query = query.filter_by(id=entity_id)
+            entity = query.one()
+        
+        except sa_orm.exc.NoResultFound:
+            if not suppress_exception:
+                LOG.exception("Problem getting HSM Partition ID %s",
+                              entity_id)
+                raise exception.NotFound(u._(
+                    "No {entity_name} found with ID {id}").format(
+                        entity_name=self._do_entity_name(),
+                        id=entity_id))
+
+        return entity
+
+
+        return query.filter_by(id=entity_id).first()
+
+    def get_by_project_id(self, project_id, session=None):
+        """Get all partition configs for a project."""
+        pass
+
+    def create_from(self, entity):
+        """Create new partition entity."""
+        pass
+
+    def save(self, entity):
+        """Save partition entity updates."""
+        pass
+
+    def delete_entity_by_id(self, entity_id, session=None):
+        """Delete partition config."""
+        pass
+
+
+class ProjectHSMPartitionRepo(BaseRepo):
+    """Repository for the ProjectHSMPartition entity.
+    
+    ProjectHSMPartition entries associate projects with their HSM partition
+    configurations.
+    """
+
+    def get_by_project_id(self, project_id, suppress_exception=False, 
+                         session=None):
+        """Returns HSM partition config for a project if set.
+        
+        :param project_id: ID of project  
+        :param suppress_exception: when True, NotFound is not raised
+        :param session: SQLAlchemy session object
+        :raises NotFound: if no partition is found for the project
+        :returns: ProjectHSMPartition entity if found
+        """
+        session = self.get_session(session)
+        
+        query = session.query(models.ProjectHSMPartition)
+        query = query.filter_by(project_id=project_id)
+        
+        try:
+            entity = query.one()
+        except sa_orm.exc.NoResultFound:
+            LOG.info("No HSM partition found for project = %s", project_id)
+            entity = None
+            if not suppress_exception:
+                _raise_entity_not_found(self._do_entity_name(), project_id)
+                
+        return entity
+
+    def create_or_update_for_project(self, project_id, partition_id, 
+                                   session=None):
+        """Create or update HSM partition config for a project.
+        
+        :param project_id: ID of project
+        :param partition_id: ID of HSM partition config
+        :param session: SQLAlchemy session object
+        :returns: Created/updated ProjectHSMPartition entity
+        """
+        session = self.get_session(session)
+        
+        try:
+            entity = self.get_by_project_id(project_id, session=session)
+        except exception.NotFound:
+            entity = self.create_from(
+                models.ProjectHSMPartition(project_id=project_id,
+                                         partition_id=partition_id),
+                session=session)
+        else:
+            entity.partition_id = partition_id
+            entity.save(session)
+            
+        return entity
+
+    def _do_entity_name(self):
+        """Sub-class hook: return entity name for debugging."""
+        return "ProjectHSMPartition"
+
+    def _do_build_get_query(self, entity_id, external_project_id, session):
+        """Sub-class hook: build a retrieve query."""
+        return session.query(models.ProjectHSMPartition).filter_by(
+            id=entity_id)
+
+    def _do_validate(self, values):
+        """Sub-class hook: validate values."""
+        pass
+
+    def _build_get_project_entities_query(self, project_id, session):
+        """Builds query for getting HSM partition config for a project.
+        
+        :param project_id: id of barbican project entity 
+        :param session: existing db session reference
+        """
+        return session.query(models.ProjectHSMPartition).filter_by(
+            project_id=project_id)
 
 class SecretConsumerRepo(BaseRepo):
     """Repository for the SecretConsumer entity."""
@@ -2575,6 +2700,10 @@ def get_encrypted_datum_repository():
     global _ENCRYPTED_DATUM_REPOSITORY
     return _get_repository(_ENCRYPTED_DATUM_REPOSITORY, EncryptedDatumRepo)
 
+def get_hsm_partition_repository():
+    """Returns a singleton HSMPartitionConfig repository instance."""
+    global _HSM_PARTITION_REPOSITORY
+    return _get_repository(_HSM_PARTITION_REPOSITORY, HSMPartitionConfigRepo)
 
 def get_kek_datum_repository():
     """Returns a singleton KEK Datum repository instance."""
