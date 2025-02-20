@@ -68,6 +68,7 @@ _PREFERRED_CA_REPOSITORY = None
 _PROJECT_REPOSITORY = None
 _PROJECT_CA_REPOSITORY = None
 _PROJECT_QUOTAS_REPOSITORY = None
+_PROJECT_HSM_PARTITION_REPOSITORY = None
 _SECRET_ACL_USER_REPOSITORY = None
 _SECRET_ACL_REPOSITORY = None
 _SECRET_META_REPOSITORY = None
@@ -2762,6 +2763,11 @@ def get_project_quotas_repository():
     global _PROJECT_QUOTAS_REPOSITORY
     return _get_repository(_PROJECT_QUOTAS_REPOSITORY,
                            ProjectQuotasRepo)
+
+def get_project_hsm_repository():
+    """Returns a singleton ProjectHSMPartition repository instance."""
+    global _PROJECT_HSM_PARTITION_REPOSITORY  
+    return _get_repository(_PROJECT_HSM_PARTITION_REPOSITORY, ProjectHSMPartitionRepo)
 
 
 def get_secret_acl_repository():
