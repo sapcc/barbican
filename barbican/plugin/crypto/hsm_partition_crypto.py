@@ -17,8 +17,8 @@ hsm_partition_crypto_plugin_opts = [
     cfg.StrOpt('plugin_name',
                help=u._('User friendly plugin name'),
                default='HSM Partition Crypto Plugin'),
-    cfg.StrOpt('partition_id',
-               help=u._('ID of the HSM partition to use'),
+    cfg.StrOpt('default_partition_id',
+               help=u._('Default HSM partition ID if no project mapping exists'),
                default=None),
     cfg.StrOpt('mkek_label',
                help=u._('Master KEK label (as stored in the HSM)')),
@@ -135,64 +135,137 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         self.pkek_cache_ttl = self.hsm_partition_conf.pkek_cache_ttl
         self.pkek_cache_limit = self.hsm_partition_conf.pkek_cache_limit
 
+        # Initialize repository interfaces
+        self.hsm_partition_repo = repositories.get_hsm_partition_repository()
+        self.project_hsm_repo = repositories.get_project_hsm_repository()
+
+        # Initialize as None - will be set when first operation occurs
+        # TODO: This implies just one operation at a time
+        self.current_project_id = None
+        self.current_partition = None
+
         # Create PKCS11 instance
-        self.pkcs11 = pkcs11 or self._create_pkcs11(ffi)
+        # self.pkcs11 = pkcs11 or self._create_pkcs11(ffi)
     
-        # Configure object cache same as parent
+        # self._configure_object_cache()
+        # super(HSMPartitionCryptoPlugin, self).__init__(conf, ffi=ffi, pkcs11=None)
+
+    def _get_partition_for_project(self, project_id):
+        """Get HSM partition configuration for a project."""
+        if not project_id:
+            raise ValueError(u._("Project ID is required"))
+
+        # Check for project-specific mapping
+        proj_mapping = self.project_hsm_repo.get_by_project_id(project_id) 
+        if proj_mapping:
+            return self.hsm_partition_repo.get_by_id(proj_mapping.partition_id)
+
+        # Fall back to default if configured
+        if self.hsm_partition_conf.default_partition_id:
+            return self.hsm_partition_repo.get_by_id(self.hsm_partition_conf.default_partition_id)
+
+        return None
+
+    def _configure_pkcs11(self, project_id):
+        """Configure PKCS11 for the specified project if needed."""
+
+        # If we're already configured for this project, do nothing
+        if project_id == self.current_project_id and self.pkcs11 is not None:
+            return
+
+        # Get partition config for the project
+        partition = self._get_partition_for_project(project_id)
+        if not partition:
+            raise ValueError(u._("No HSM partition mapping found for project"))
+
+        # Store current project and partition
+        self.current_project_id = project_id
+        self.current_partition = partition
+
+        # Set required attributes for parent class
+        self.library_path = partition.credentials['library_path']
+        self.login = partition.credentials['password']
+        self.slot_id = int(partition.slot_id)
+        self.token_labels = ([partition.token_label] if partition.token_label else None)
+
+        # Create new PKCS11 instance
+        self.pkcs11 = self._create_pkcs11(None)
         self._configure_object_cache()
-        super(HSMPartitionCryptoPlugin, self).__init__(conf, ffi=ffi, pkcs11=pkcs11)
 
-    def _create_pkcs11(self, ffi=None):
-        """Override PKCS11 creation to use partition config.
-        
-        Gets HSM partition configuration from database and uses it to 
-        initialize PKCS11 connection.
-        """
-        # Get partition config from database
-        hsm_partition_config_repo = repositories.get_hsm_partition_repository()
-        partition_config = hsm_partition_config_repo.get_by_id(self.hsm_partition_conf.partition_id)
-        if not partition_config:
-            raise ValueError(u._("HSM partition configuration not found"))
 
-        # Set instance attributes needed by parent class
-        self.library_path = partition_config.credentials['library_path']
-        self.login = partition_config.credentials['password']
-        self.slot_id = int(partition_config.slot_id)
-        self.token_labels = ([partition_config.token_label] if partition_config.token_label else None)
+    # def _create_pkcs11(self, ffi=None):
+    #     """Override PKCS11 creation to use partition config.
+    #     
+    #     Gets HSM partition configuration from database and uses it to 
+    #     initialize PKCS11 connection.
+    #     """
+    #     # Get partition config from database
+    #     hsm_partition_config_repo = repositories.get_hsm_partition_repository()
+    #     partition_config = hsm_partition_config_repo.get_by_id(self.hsm_partition_conf.partition_id)
+    #     if not partition_config:
+    #         raise ValueError(u._("HSM partition configuration not found"))
+    # 
+    #     # Set instance attributes needed by parent class
+    #     self.library_path = partition_config.credentials['library_path']
+    #     self.login = partition_config.credentials['password']
+    #     self.slot_id = int(partition_config.slot_id)
+    #     self.token_labels = ([partition_config.token_label] if partition_config.token_label else None)
+    # 
+    #     # Handle seed file same as parent
+    #     seed_random_buffer = None
+    #     if self.seed_file:
+    #         with open(self.seed_file, 'rb') as f:
+    #             seed_random_buffer = f.read(self.seed_length)
+    # 
+    #      # Validate configuration
+    #     if not self.library_path:
+    #         raise ValueError(u._("library_path not found in partition credentials"))
+    #     if not self.login:
+    #         raise ValueError(u._("password not found in partition credentials"))
+    #     if not self.slot_id:
+    #         raise ValueError(u._("slot_id not found in partition configuration"))
+    # 
+    #     LOG.debug("Initializing PKCS11 for partition %s with token label %s on slot %s",
+    #             partition_config.partition_label,
+    #             partition_config.token_label,
+    #             self.slot_id)
+    # 
+    #     # Create PKCS11 instance with partition config
+    #     return pkcs11.PKCS11(
+    #         library_path=self.library_path,
+    #         login_passphrase=self.login,
+    #         slot_id=self.slot_id,
+    #         token_labels=self.token_labels,
+    #         rw_session=self.rw_session,
+    #         seed_random_buffer=seed_random_buffer,
+    #         encryption_mechanism=self.encryption_mechanism,
+    #         encryption_gen_iv=self.encryption_gen_iv,
+    #         always_set_cka_sensitive=self.cka_sensitive,
+    #         hmac_mechanism=self.hmac_mechanism,
+    #         key_wrap_mechanism=self.key_wrap_mechanism,
+    #         key_wrap_gen_iv=self.key_wrap_gen_iv,
+    #         os_locking_ok=self.os_locking_ok,
+    #         ffi=ffi
+    #     )
 
-        # Handle seed file same as parent
-        seed_random_buffer = None
-        if self.seed_file:
-            with open(self.seed_file, 'rb') as f:
-                seed_random_buffer = f.read(self.seed_length)
+    def encrypt(self, encrypt_dto, kek_meta_dto, project_id):
+        self._configure_pkcs11(project_id)
+        return super(HSMPartitionCryptoPlugin, self).encrypt(
+            encrypt_dto, kek_meta_dto, project_id)
 
-         # Validate configuration
-        if not self.library_path:
-            raise ValueError(u._("library_path not found in partition credentials"))
-        if not self.login:
-            raise ValueError(u._("password not found in partition credentials"))
-        if not self.slot_id:
-            raise ValueError(u._("slot_id not found in partition configuration"))
+    def decrypt(self, decrypt_dto, kek_meta_dto, kek_meta_extended, project_id):
+        self._configure_pkcs11(project_id)
+        return super(HSMPartitionCryptoPlugin, self).decrypt(
+            decrypt_dto, kek_meta_dto, kek_meta_extended, project_id)
 
-        LOG.debug("Initializing PKCS11 for partition %s with token label %s on slot %s",
-                partition_config.partition_label,
-                partition_config.token_label,
-                self.slot_id)
+    def bind_kek_metadata(self, kek_meta_dto):
+        # Extract project_id from the kek_meta_dto
+        project_id = kek_meta_dto.project_id
+        self._configure_pkcs11(project_id)
+        return super(HSMPartitionCryptoPlugin, self).bind_kek_metadata(
+            kek_meta_dto)
 
-        # Create PKCS11 instance with partition config
-        return pkcs11.PKCS11(
-            library_path=self.library_path,
-            login_passphrase=self.login,
-            slot_id=self.slot_id,
-            token_labels=self.token_labels,
-            rw_session=self.rw_session,
-            seed_random_buffer=seed_random_buffer,
-            encryption_mechanism=self.encryption_mechanism,
-            encryption_gen_iv=self.encryption_gen_iv,
-            always_set_cka_sensitive=self.cka_sensitive,
-            hmac_mechanism=self.hmac_mechanism,
-            key_wrap_mechanism=self.key_wrap_mechanism,
-            key_wrap_gen_iv=self.key_wrap_gen_iv,
-            os_locking_ok=self.os_locking_ok,
-            ffi=ffi
-        )
+    def generate_symmetric(self, generate_dto, kek_meta_dto, project_id):
+        self._configure_pkcs11(project_id)
+        return super(HSMPartitionCryptoPlugin, self).generate_symmetric(
+            generate_dto, kek_meta_dto, project_id)
