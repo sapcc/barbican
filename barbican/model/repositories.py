@@ -2448,16 +2448,29 @@ class ProjectHSMPartitionRepo(BaseRepo):
         """
         session = self.get_session(session)
         
+        # First try to find by internal project ID
         query = session.query(models.ProjectHSMPartition)
         query = query.filter_by(project_id=project_id)
-        
+
         try:
             entity = query.one()
         except sa_orm.exc.NoResultFound:
-            LOG.info("No HSM partition found for project = %s", project_id)
-            entity = None
-            if not suppress_exception:
-                _raise_entity_not_found(self._do_entity_name(), project_id)
+            # If not found, project_id might be an external ID
+            try:
+                # Try to find the internal project ID first
+                project_query = session.query(models.Project)
+                project_query = project_query.filter_by(external_id=project_id)
+                project = project_query.one()
+
+                # Then try to find the HSM partition with the internal ID
+                query = session.query(models.ProjectHSMPartition)
+                query = query.filter_by(project_id=project.id)
+                entity = query.one()
+            except sa_orm.exc.NoResultFound:
+                LOG.info("No HSM partition found for project = %s", project_id)
+                entity = None
+                if not suppress_exception:
+                    _raise_entity_not_found(self._do_entity_name(), project_id)
                 
         return entity
 
