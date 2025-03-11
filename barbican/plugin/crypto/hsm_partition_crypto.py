@@ -204,7 +204,24 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
 
     def bind_kek_metadata(self, kek_meta_dto):
         # Extract project_id from the kek_meta_dto
-        project_id = kek_meta_dto.project_id
+        if hasattr(kek_meta_dto, 'project_id'):
+            project_id = kek_meta_dto.project_id
+        else:
+            # For the bind_kek_metadata case, get project_id from kek_label
+            # The format is "project-{external_id}-key-{uuid}"
+            try:
+                label_parts = kek_meta_dto.kek_label.split('-')
+                if len(label_parts) >= 4 and label_parts[0] == 'project':
+                    project_id = label_parts[1]
+                else:
+                    # If we can't determine project_id, use default partition
+                    LOG.warning("Cannot determine project_id from kek_label: %s, using default partition", 
+                                kek_meta_dto.kek_label)
+                    project_id = None
+            except (AttributeError, IndexError):
+                LOG.warning("Invalid kek_label format, using default partition")
+                project_id = None
+
         self._configure_pkcs11(project_id)
         return super(HSMPartitionCryptoPlugin, self).bind_kek_metadata(
             kek_meta_dto)
