@@ -99,7 +99,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         # Always use our module-level CONF if no config is provided
         if conf is None:
             conf = CONF
-
+ 
         # Make sure p11_crypto_plugin group is accessible
         if not hasattr(conf, 'p11_crypto_plugin'):
             # Register p11 options if not already registered
@@ -191,62 +191,6 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         # Create new PKCS11 instance
         self.pkcs11 = self._create_pkcs11(None)
         self._configure_object_cache()
-
-
-    # def _create_pkcs11(self, ffi=None):
-    #     """Override PKCS11 creation to use partition config.
-    #     
-    #     Gets HSM partition configuration from database and uses it to 
-    #     initialize PKCS11 connection.
-    #     """
-    #     # Get partition config from database
-    #     hsm_partition_config_repo = repositories.get_hsm_partition_repository()
-    #     partition_config = hsm_partition_config_repo.get_by_id(self.hsm_partition_conf.partition_id)
-    #     if not partition_config:
-    #         raise ValueError(u._("HSM partition configuration not found"))
-    # 
-    #     # Set instance attributes needed by parent class
-    #     self.library_path = partition_config.credentials['library_path']
-    #     self.login = partition_config.credentials['password']
-    #     self.slot_id = int(partition_config.slot_id)
-    #     self.token_labels = ([partition_config.token_label] if partition_config.token_label else None)
-    # 
-    #     # Handle seed file same as parent
-    #     seed_random_buffer = None
-    #     if self.seed_file:
-    #         with open(self.seed_file, 'rb') as f:
-    #             seed_random_buffer = f.read(self.seed_length)
-    # 
-    #      # Validate configuration
-    #     if not self.library_path:
-    #         raise ValueError(u._("library_path not found in partition credentials"))
-    #     if not self.login:
-    #         raise ValueError(u._("password not found in partition credentials"))
-    #     if not self.slot_id:
-    #         raise ValueError(u._("slot_id not found in partition configuration"))
-    # 
-    #     LOG.debug("Initializing PKCS11 for partition %s with token label %s on slot %s",
-    #             partition_config.partition_label,
-    #             partition_config.token_label,
-    #             self.slot_id)
-    # 
-    #     # Create PKCS11 instance with partition config
-    #     return pkcs11.PKCS11(
-    #         library_path=self.library_path,
-    #         login_passphrase=self.login,
-    #         slot_id=self.slot_id,
-    #         token_labels=self.token_labels,
-    #         rw_session=self.rw_session,
-    #         seed_random_buffer=seed_random_buffer,
-    #         encryption_mechanism=self.encryption_mechanism,
-    #         encryption_gen_iv=self.encryption_gen_iv,
-    #         always_set_cka_sensitive=self.cka_sensitive,
-    #         hmac_mechanism=self.hmac_mechanism,
-    #         key_wrap_mechanism=self.key_wrap_mechanism,
-    #         key_wrap_gen_iv=self.key_wrap_gen_iv,
-    #         os_locking_ok=self.os_locking_ok,
-    #         ffi=ffi
-    #     )
 
     def encrypt(self, encrypt_dto, kek_meta_dto, project_id):
         self._configure_pkcs11(project_id)
