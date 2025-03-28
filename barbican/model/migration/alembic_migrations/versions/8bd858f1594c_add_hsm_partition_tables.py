@@ -60,7 +60,7 @@ def upgrade():
         mysql_engine='InnoDB'
     )
 
-def downgrade():
-    # Drop tables 
-    op.drop_table('hsm_partition_configs')
+# def downgrade():
+#     # Drop tables
+#     op.drop_table('hsm_partition_configs')
 
