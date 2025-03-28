@@ -55,7 +55,11 @@ def upgrade():
         sa.Column('partition_metadata', JsonBlob(), nullable=True),
         sa.Column('status', sa.String(20), nullable=False),
         sa.Column('deleted', sa.Boolean, nullable=False, default=False),
-        sa.ForeignKeyConstraint(['project_id'], ['projects.id'])
+        sa.PrimaryKeyConstraint('id'),
+        sa.ForeignKeyConstraint(['project_id'], ['projects.id'], ondelete='CASCADE', onupdate='CASCADE', name='fk_hsm_project_id'),
+        mysql_engine='InnoDB',
+        mysql_charset='utf8',
+        mysql_collate='utf8_general_ci'
     )
 
     # Create hsm_partition_secrets table
@@ -66,12 +70,12 @@ def upgrade():
         sa.Column('secret_id', sa.String(36), nullable=False),
         sa.Column('partition_id', sa.String(36), nullable=False),
         sa.Column('hsm_key_label', sa.String(255), nullable=True),
-         sa.PrimaryKeyConstraint('id'),
-         sa.ForeignKeyConstraint(['secret_id'], ['secrets.id'], ondelete='CASCADE', onupdate='CASCADE', name='fk_hsm_secret_id'),
-         sa.ForeignKeyConstraint(['partition_id'], ['hsm_partition_configs.id'], ondelete='CASCADE', onupdate='CASCADE', name='fk_hsm_partition_id'),
-         mysql_engine='InnoDB',
-         mysql_charset='utf8',
-         mysql_collate='utf8_general_ci'
+        sa.PrimaryKeyConstraint('id'),
+        sa.ForeignKeyConstraint(['secret_id'], ['secrets.id'], ondelete='CASCADE', onupdate='CASCADE', name='fk_hsm_secret_id'),
+        sa.ForeignKeyConstraint(['partition_id'], ['hsm_partition_configs.id'], ondelete='CASCADE', onupdate='CASCADE', name='fk_hsm_partition_id'),
+        mysql_engine='InnoDB',
+        mysql_charset='utf8',
+        mysql_collate='utf8_general_ci'
     )
 
 def downgrade():
