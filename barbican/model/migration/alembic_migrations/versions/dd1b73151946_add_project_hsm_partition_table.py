@@ -38,26 +38,14 @@ def upgrade():
         sa.Column('deleted_at', sa.DateTime, nullable=True),
         sa.Column('deleted', sa.Boolean, nullable=False, default=False),
         sa.Column('status', sa.String(20), nullable=False),
-        
-        sa.Column('project_id', sa.String(36),
-                 sa.ForeignKey('projects.id'),
-                 nullable=False),
-        sa.Column('partition_id', sa.String(36), 
-                 sa.ForeignKey('hsm_partition_configs.id'),
-                 nullable=False),
-        
-        # Ensure one partition per project
-        sa.UniqueConstraint('project_id', name='_project_hsm_partition_uc'),
-         mysql_engine='InnoDB',
-         mysql_charset='utf8',
-         mysql_collate='utf8_general_ci',
-    )
+        sa.Column('project_id', sa.String(36), nullable=False),
+        sa.Column('partition_id', sa.String(36), nullable=False),
 
-    # Create index on project_id for faster lookups
-    op.create_index(
-        'project_hsm_partitions_project_id_idx',
-        'project_hsm_partitions',
-        ['project_id']
+        # Ensure one partition per project
+        sa.ForeignKeyConstraint(['project_id'], ['projects.id'], name="project_id_fk"),
+        sa.ForeignKeyConstraint(['partition_id'], ['hsm_partition_configs.id'], name="hsm_partition_config_id_fk"),
+        sa.UniqueConstraint('project_id', name='_project_hsm_partition_uc'),
+        mysql_engine='InnoDB'
     )
 
 def downgrade():
