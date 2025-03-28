@@ -48,5 +48,5 @@ def upgrade():
         mysql_engine='InnoDB'
     )
 
-def downgrade():
-    op.drop_table('project_hsm_partitions')
+# def downgrade():
+#     op.drop_table('project_hsm_partitions')
