@@ -48,6 +48,9 @@ def upgrade():
         
         # Ensure one partition per project
         sa.UniqueConstraint('project_id', name='_project_hsm_partition_uc'),
+         mysql_engine='InnoDB',
+         mysql_charset='utf8',
+         mysql_collate='utf8_general_ci',
     )
 
     # Create index on project_id for faster lookups
