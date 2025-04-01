@@ -350,6 +350,55 @@ class HSMCommands(object):
             print("The label {label} already exists!".format(label=label))
             sys.exit(1)
 
+    @args('--library-path', metavar='<library-path>', dest='libpath',
+          help='Path to vendor PKCS#11 library')
+    def list_slots(self, conf, libpath=None):
+        """List available PKCS#11 slots with token info using Barbican PKCS11 wrapper"""
+        if libpath is None:
+            libpath = conf.p11_crypto_plugin.library_path
+
+        try:
+            self._create_pkcs11_session(conf, passphrase=None, libpath=libpath, slotid=None, hmacwrap=None)
+            slots = self.pkcs11.get_all_slots()
+
+            if not slots:
+                print("No PKCS#11 slots with tokens present.")
+                return
+
+            print("Available slots with token info:")
+            for slot in slots:
+                try:
+                    info = self.pkcs11.get_token_info(slot)
+                    print(f"Slot {slot}: Label='{info.label.strip()}', Serial='{info.serialNumber.strip()}', Manufacturer='{info.manufacturerID.strip()}', Model='{info.model.strip()}'")
+                except Exception:
+                    print(f"Slot {slot}: No token present or unreadable.")
+
+        except Exception as e:
+            print(f"Failed to list slots: {e}")
+        finally:
+            self.pkcs11.return_session(self.session)
+
+
+    @args('--library-path', metavar='<library-path>', dest='libpath',
+          help='Path to vendor PKCS11 library')
+    @args('--slot-id', metavar='<slot-id>', dest='slotid',
+          help='HSM Slot ID containing Token to be used.')
+    @args('--passphrase', metavar='<passphrase>',
+          help='Password (PIN) to login to PKCS#11 Token')
+    def list_keys(self, conf, passphrase=None, libpath=None, slotid=None):
+        """List cryptographic objects (keys) in the HSM slot/token using Barbican PKCS11 wrapper"""
+        try:
+            self._create_pkcs11_session(conf, passphrase, libpath, slotid, None)
+            keys = self.pkcs11.list_keys(self.session)
+            print(f"Found {len(keys)} key(s) in the token.")
+            for label, key_type in keys:
+                print(f"Label: {label}, Type: {key_type}")
+        except Exception as e:
+            print(f"Failed to list keys: {e}")
+        finally:
+            self.pkcs11.return_session(self.session)
+
+
 class SAPCommands(object):
 
     description = "Move all secrets associated with the old_project_id to the new_project_id."
