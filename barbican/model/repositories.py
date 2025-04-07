@@ -670,12 +670,13 @@ class SecretRepo(BaseRepo):
         """Sub-class hook: build a retrieve query."""
         utcnow = timeutils.utcnow()
 
-        expiration_filter = or_(models.Secret.expiration.is_(None),
-                                models.Secret.expiration > utcnow)
+        # Allow to fetch expired Secrets.
+        # expiration_filter = or_(models.Secret.expiration.is_(None),
+        #                         models.Secret.expiration > utcnow)
 
         query = session.query(models.Secret)
         query = query.filter_by(id=entity_id, deleted=False)
-        query = query.filter(expiration_filter)
+        # query = query.filter(expiration_filter)
         query = query.join(models.Project)
         query = query.filter(models.Project.external_id == external_project_id)
         return query
@@ -692,12 +693,14 @@ class SecretRepo(BaseRepo):
         """
 
         utcnow = timeutils.utcnow()
-        expiration_filter = or_(models.Secret.expiration.is_(None),
-                                models.Secret.expiration > utcnow)
+
+        # Allow to fetch expired Secrets.
+        # expiration_filter = or_(models.Secret.expiration.is_(None),
+        #                         models.Secret.expiration > utcnow)
 
         query = session.query(models.Secret).filter_by(deleted=False)
         query = query.filter(models.Secret.project_id == project_id)
-        query = query.filter(expiration_filter)
+        # query = query.filter(expiration_filter)
 
         return query
 
@@ -764,12 +767,14 @@ class SecretRepo(BaseRepo):
         session = self.get_session(session)
         try:
             utcnow = timeutils.utcnow()
-            expiration_filter = or_(models.Secret.expiration.is_(None),
-                                    models.Secret.expiration > utcnow)
+
+            # Allow to fetch expired Secrets.
+            # expiration_filter = or_(models.Secret.expiration.is_(None),
+            #                         models.Secret.expiration > utcnow)
 
             query = session.query(models.Secret)
             query = query.filter_by(id=entity_id, deleted=False)
-            query = query.filter(expiration_filter)
+            # query = query.filter(expiration_filter)
             entity = query.one()
         except sa_orm.exc.NoResultFound:
             entity = None
@@ -2392,12 +2397,12 @@ class HSMPartitionConfigRepo(BaseRepo):
     def get_by_id(self, entity_id, session=None):
         """Get partition config by ID."""
         session = self.get_session(session)
-        
+
         try:
             query = session.query(models.HSMPartitionConfig)
             query = query.filter_by(id=entity_id)
             entity = query.one()
-        
+
         except sa_orm.exc.NoResultFound:
             if not suppress_exception:
                 LOG.exception("Problem getting HSM Partition ID %s",
@@ -2431,23 +2436,23 @@ class HSMPartitionConfigRepo(BaseRepo):
 
 class ProjectHSMPartitionRepo(BaseRepo):
     """Repository for the ProjectHSMPartition entity.
-    
+
     ProjectHSMPartition entries associate projects with their HSM partition
     configurations.
     """
 
-    def get_by_project_id(self, project_id, suppress_exception=False, 
+    def get_by_project_id(self, project_id, suppress_exception=False,
                          session=None):
         """Returns HSM partition config for a project if set.
-        
-        :param project_id: ID of project  
+
+        :param project_id: ID of project
         :param suppress_exception: when True, NotFound is not raised
         :param session: SQLAlchemy session object
         :raises NotFound: if no partition is found for the project
         :returns: ProjectHSMPartition entity if found
         """
         session = self.get_session(session)
-        
+
         # First try to find by internal project ID
         query = session.query(models.ProjectHSMPartition)
         query = query.filter_by(project_id=project_id)
@@ -2471,20 +2476,20 @@ class ProjectHSMPartitionRepo(BaseRepo):
                 entity = None
                 if not suppress_exception:
                     _raise_entity_not_found(self._do_entity_name(), project_id)
-                
+
         return entity
 
-    def create_or_update_for_project(self, project_id, partition_id, 
+    def create_or_update_for_project(self, project_id, partition_id,
                                    session=None):
         """Create or update HSM partition config for a project.
-        
+
         :param project_id: ID of project
         :param partition_id: ID of HSM partition config
         :param session: SQLAlchemy session object
         :returns: Created/updated ProjectHSMPartition entity
         """
         session = self.get_session(session)
-        
+
         try:
             entity = self.get_by_project_id(project_id, session=session)
         except exception.NotFound:
@@ -2495,7 +2500,7 @@ class ProjectHSMPartitionRepo(BaseRepo):
         else:
             entity.partition_id = partition_id
             entity.save(session)
-            
+
         return entity
 
     def _do_entity_name(self):
@@ -2513,8 +2518,8 @@ class ProjectHSMPartitionRepo(BaseRepo):
 
     def _build_get_project_entities_query(self, project_id, session):
         """Builds query for getting HSM partition config for a project.
-        
-        :param project_id: id of barbican project entity 
+
+        :param project_id: id of barbican project entity
         :param session: existing db session reference
         """
         return session.query(models.ProjectHSMPartition).filter_by(
@@ -2779,7 +2784,7 @@ def get_project_quotas_repository():
 
 def get_project_hsm_repository():
     """Returns a singleton ProjectHSMPartition repository instance."""
-    global _PROJECT_HSM_PARTITION_REPOSITORY  
+    global _PROJECT_HSM_PARTITION_REPOSITORY
     return _get_repository(_PROJECT_HSM_PARTITION_REPOSITORY, ProjectHSMPartitionRepo)
 
 
