@@ -1,4 +1,5 @@
-# Copyright 2025 OpenStack Foundation
+# Copyright (c) 2025 SAP SE
+# All Rights Reserved.
 #
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
@@ -11,7 +12,7 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-#
+
 """add_hsm_partition_tables
 Revision ID: 8bd858f1594c
 Revises: 8c74e2d7f1ff
