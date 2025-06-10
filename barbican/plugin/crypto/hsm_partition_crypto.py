@@ -1,10 +1,8 @@
 from oslo_config import cfg
 from barbican import i18n as u
 from barbican.model import repositories
-from barbican.plugin.crypto import base as c
 from barbican.plugin.crypto import p11_crypto
-from barbican.common import config
-from barbican.plugin.crypto import pkcs11
+from barbican.common import config, exception
 from barbican.common import utils
 
 LOG = utils.getLogger(__name__)
@@ -143,7 +141,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         try:
             self.conf = conf[self.section_name]
             LOG.info(f"Using HSM configuration section: {self.section_name}")
-        except KeyError:
+        except cfg.NoSuchOptError:
             # Section doesn't exist - either create dynamically or use base
             if self.store_plugin_name != 'default':
                 LOG.warning(f"No config found for {self.section_name}, registering dynamically")
@@ -211,7 +209,6 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
                 return self.hsm_partition_repo.get_by_id(self.conf.default_partition_id)
             except exception.NotFound:
                 LOG.warning(f"Default partition ID {self.conf.default_partition_id} not found")
-                pass
 
         # Nothing found
         raise ValueError(u._("No HSM partition mapping found for project and no valid default configured"))
