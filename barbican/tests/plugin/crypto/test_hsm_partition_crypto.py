@@ -12,16 +12,42 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-
+import threading
 from unittest import mock
-
+from barbican import i18n as u
 from oslo_config import cfg
 
 from barbican.common import config, exception
-from barbican.model.models import HSMPartitionConfig, KEKDatum, ProjectHSMPartition
+from barbican.model.models import HSMPartitionConfig, ProjectHSMPartition
 from barbican.plugin.crypto import hsm_partition_crypto, p11_crypto
-from barbican.plugin.crypto.base import KEKMetaDTO, ResponseDTO
+from barbican.plugin.crypto.base import ResponseDTO
 from barbican.tests import utils
+
+
+class PluginOperationThread(threading.Thread):
+    def __init__(self, index, results):
+        threading.Thread.__init__(self)
+        self.index = index
+        self.results = results
+        self.plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin()
+        self.plugin._configure_pkcs11 = mock.MagicMock()
+
+    def run(self):
+        with mock.patch.object(p11_crypto.P11CryptoPlugin, "encrypt") as mock_encrypt:
+            mock_encrypt.return_value = ResponseDTO(
+                cypher_text=f"cypher_text_{self.index}".encode("utf-8"),
+                kek_meta_extended=(
+                    '{"iv":"AAAA",'
+                    '"mechanism":"CKM_AES_CBC",'
+                    '"key_wrap_mechanism":"CKM_AES_CBC_PAD"}'
+                ),
+            )
+
+            self.results[self.index] = self.plugin.encrypt(
+                encrypt_dto=mock.MagicMock(),
+                kek_meta_dto=mock.MagicMock(),
+                project_id=f"project_{self.index}",
+            )
 
 
 class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
@@ -234,6 +260,33 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         self.assertEqual(self.cypher_text, response_dto.cypher_text)
         self.assertEqual(self.kek_meta_extended, response_dto.kek_meta_extended)
 
+    def test_encrypt_with_multi_threads(self):
+        results = [None] * 10
+
+        # Setup 10 threads to call encrypt() at same time
+        for i in range(10):
+            t = PluginOperationThread(i, results)
+            t.start()
+
+        # Verify all threads return corresponding response
+        for i in range(10):
+            self.assertEqual(f"cypher_text_{i}".encode("utf-8"), results[i].cypher_text)
+
+    def test_encrypt_raises_error_for_misconfigured_partition(self):
+        plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin()
+        plugin._configure_pkcs11 = mock.MagicMock()
+        plugin._configure_pkcs11.side_effect = ValueError(
+            u._("No HSM partition mapping found for project")
+        )
+
+        self.assertRaises(
+            ValueError,
+            plugin.encrypt,
+            mock.MagicMock(),
+            mock.MagicMock(),
+            self.project_id,
+        )
+
     def test_decrypt(self):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin()
 
@@ -252,6 +305,22 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         self.assertEqual(1, plugin._configure_pkcs11.call_count)
         self.assertEqual(1, mock_decrypt.call_count)
         self.assertEqual(b"0", pt)
+
+    def test_decrypt_raises_error_for_misconfigured_partition(self):
+        plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin()
+        plugin._configure_pkcs11 = mock.MagicMock()
+        plugin._configure_pkcs11.side_effect = ValueError(
+            u._("No HSM partition mapping found for project")
+        )
+
+        self.assertRaises(
+            ValueError,
+            plugin.decrypt,
+            mock.MagicMock(),
+            mock.MagicMock(),
+            mock.MagicMock(),
+            self.project_id,
+        )
 
     def test_generate_symmetric(self):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin()
@@ -276,6 +345,21 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         self.assertEqual(1, mock_generate_symmetric.call_count)
         self.assertEqual(self.cypher_text, response_dto.cypher_text)
         self.assertEqual(self.kek_meta_extended, response_dto.kek_meta_extended)
+
+    def test_generate_symmetric_raises_error_for_misconfigure_partition(self):
+        plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin()
+        plugin._configure_pkcs11 = mock.MagicMock()
+        plugin._configure_pkcs11.side_effect = ValueError(
+            u._("No HSM partition mapping found for project")
+        )
+
+        self.assertRaises(
+            ValueError,
+            plugin.generate_symmetric,
+            mock.MagicMock(),
+            mock.MagicMock(),
+            self.project_id,
+        )
 
 
 class WhenTestingVendorPluginConfigurationIsolation(utils.BaseTestCase):
