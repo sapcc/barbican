@@ -276,3 +276,68 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         self.assertEqual(1, mock_generate_symmetric.call_count)
         self.assertEqual(self.cypher_text, response_dto.cypher_text)
         self.assertEqual(self.kek_meta_extended, response_dto.kek_meta_extended)
+
+
+class WhenTestingVendorPluginConfigurationIsolation(utils.BaseTestCase):
+    """Test that vendor plugins use isolated configurations."""
+
+    def setUp(self):
+        super(WhenTestingVendorPluginConfigurationIsolation, self).setUp()
+        self.conf = config.new_config()
+
+    def test_vendor_plugins_use_different_sections(self):
+        """Test that vendor plugins use different configuration sections."""
+        utimaco_plugin = hsm_partition_crypto.UtimacoHSMPartitionCryptoPlugin()
+        thales_plugin = hsm_partition_crypto.ThalesHSMPartitionCryptoPlugin()
+
+        self.assertEqual(
+            "hsm_partition_crypto_plugin:utimaco_hsm", utimaco_plugin.section_name
+        )
+        self.assertEqual(
+            "hsm_partition_crypto_plugin:thales_hsm", thales_plugin.section_name
+        )
+        self.assertNotEqual(utimaco_plugin.section_name, thales_plugin.section_name)
+
+    def test_vendor_plugins_configuration_isolation(self):
+        """Test that vendor plugins read from isolated configuration sections."""
+        # Register both vendor-specific configuration sections
+        utimaco_section = "hsm_partition_crypto_plugin:utimaco_hsm"
+        thales_section = "hsm_partition_crypto_plugin:thales_hsm"
+
+        utimaco_group = cfg.OptGroup(name=utimaco_section)
+        thales_group = cfg.OptGroup(name=thales_section)
+
+        self.conf.register_group(utimaco_group)
+        self.conf.register_group(thales_group)
+
+        self.conf.register_opts(
+            hsm_partition_crypto.hsm_partition_crypto_plugin_opts, group=utimaco_group
+        )
+        self.conf.register_opts(
+            hsm_partition_crypto.hsm_partition_crypto_plugin_opts, group=thales_group
+        )
+
+        # Set different configurations for each vendor
+        self.conf[utimaco_section].plugin_name = "Utimaco Plugin"
+        self.conf[utimaco_section].default_partition_id = "utimaco_partition_123"
+
+        self.conf[thales_section].plugin_name = "Thales Plugin"
+        self.conf[thales_section].default_partition_id = "thales_partition_456"
+
+        # Create plugins and verify they read from their respective sections
+        utimaco_plugin = hsm_partition_crypto.UtimacoHSMPartitionCryptoPlugin(
+            conf=self.conf
+        )
+        thales_plugin = hsm_partition_crypto.ThalesHSMPartitionCryptoPlugin(
+            conf=self.conf
+        )
+
+        self.assertEqual("Utimaco Plugin", utimaco_plugin.get_plugin_name())
+        self.assertEqual("Thales Plugin", thales_plugin.get_plugin_name())
+
+        self.assertEqual(
+            "utimaco_partition_123", utimaco_plugin.conf.default_partition_id
+        )
+        self.assertEqual(
+            "thales_partition_456", thales_plugin.conf.default_partition_id
+        )
