@@ -18,9 +18,9 @@ from barbican import i18n as u
 from oslo_config import cfg
 
 from barbican.common import config, exception
-from barbican.model.models import HSMPartitionConfig, ProjectHSMPartition
+from barbican.model.models import HSMPartitionConfig, ProjectHSMPartition, KEKDatum
 from barbican.plugin.crypto import hsm_partition_crypto, p11_crypto
-from barbican.plugin.crypto.base import ResponseDTO
+from barbican.plugin.crypto.base import ResponseDTO, KEKMetaDTO
 from barbican.tests import utils
 
 
@@ -183,10 +183,12 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         plugin.current_project_id = self.project_id
         plugin.pkcs11 = mock.MagicMock()
         plugin._get_partition_for_project = mock.MagicMock()
+        plugin._create_pkcs11 = mock.MagicMock()
 
         plugin._configure_pkcs11(self.project_id)
 
         self.assertEqual(0, plugin._get_partition_for_project.call_count)
+        self.assertEqual(0, plugin._create_pkcs11.call_count)
 
     def test_configure_pkcs11_raises_error_for_no_partition_mapping(self):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
@@ -321,6 +323,38 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
             mock.MagicMock(),
             self.project_id,
         )
+
+    def test_bind_kek_metadata(self):
+        plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin()
+
+        plugin._configure_pkcs11 = mock.MagicMock()
+        kek_datum = KEKDatum(
+            kek_label=f"project-{self.project_id}-key-9f4d7025-ea84-454f-8b3a-3e9bb594c777"
+        )
+        kek_meta_dto = KEKMetaDTO(kek_datum)
+
+        with mock.patch.object(
+            p11_crypto.P11CryptoPlugin, "bind_kek_metadata"
+        ) as mock_bind_kek_metadata:
+            plugin.bind_kek_metadata(kek_meta_dto)
+
+        plugin._configure_pkcs11.assert_called_once_with(self.project_id)
+        self.assertEqual(1, mock_bind_kek_metadata.call_count)
+
+    def test_bind_kek_metadata_has_no_project_id(self):
+        plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin()
+
+        plugin._configure_pkcs11 = mock.MagicMock()
+        kek_datum = KEKDatum()
+        kek_meta_dto = KEKMetaDTO(kek_datum)
+
+        with mock.patch.object(
+            p11_crypto.P11CryptoPlugin, "bind_kek_metadata"
+        ) as mock_bind_kek_metadata:
+            plugin.bind_kek_metadata(kek_meta_dto)
+
+        plugin._configure_pkcs11.assert_called_once_with(None)
+        self.assertEqual(1, mock_bind_kek_metadata.call_count)
 
     def test_generate_symmetric(self):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin()
