@@ -208,8 +208,9 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         self.pkek_cache_limit = self.conf.pkek_cache_limit
 
         # Initialize repository interfaces
-        self.hsm_partition_repo = repositories.get_hsm_partition_repository()
-        self.project_hsm_repo = repositories.get_project_hsm_repository()
+        self.hsm_partition_config_repo = (
+            repositories.get_hsm_partition_config_repository()
+        )
 
         # Runtime variables
         self.current_project_id = None
@@ -220,17 +221,18 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         if not project_id:
             raise ValueError(u._("Project ID is required"))
 
-        # Check for project-specific mapping
+        # Check for project-specific partition config
         try:
-            proj_mapping = self.project_hsm_repo.get_by_project_id(project_id)
-            return self.hsm_partition_repo.get_by_id(proj_mapping.partition_id)
+            return self.hsm_partition_config_repo.get_by_project_id(project_id)
         except Exception as e:
             LOG.warning(f"Error finding default partition: {e}, {type(e).__name__}")
 
         # Fall back to default if configured
         if self.conf.default_partition_id:
             try:
-                return self.hsm_partition_repo.get_by_id(self.conf.default_partition_id)
+                return self.hsm_partition_config_repo.get_by_id(
+                    self.conf.default_partition_id
+                )
             except exception.NotFound:
                 LOG.warning(
                     f"Default partition ID {self.conf.default_partition_id} not found"
