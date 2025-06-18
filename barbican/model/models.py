@@ -26,6 +26,7 @@ from sqlalchemy.ext import declarative
 from sqlalchemy import orm
 from sqlalchemy.orm import collections as col
 from sqlalchemy import types as sql_types
+from sqlalchemy.sql.schema import UniqueConstraint
 
 from barbican.common import exception
 from barbican.common import utils
@@ -1667,103 +1668,50 @@ class ProjectSecretStore(BASE, ModelBase):
 
 class HSMPartitionConfig(BASE, ModelBase):
     """Stores HSM partition configurations."""
+
     __tablename__ = 'hsm_partition_configs'
-    
-    id = sa.Column(sa.String(36), primary_key=True)
-    created_at = sa.Column(sa.DateTime, nullable=False)
-    updated_at = sa.Column(sa.DateTime, nullable=False)
-    deleted_at = sa.Column(sa.DateTime, nullable=True)
-    
+
     # Link to project
-    project_id = sa.Column(sa.String(36), 
-                          sa.ForeignKey('projects.id'), 
-                          nullable=False)
-    
-    # HSM partition details
-    slot_id = sa.Column(sa.String(255), nullable=False)
-    token_label = sa.Column(sa.String(255), nullable=False)
-    partition_label = sa.Column(sa.String(255), nullable=False)
-    
-    # Encrypted credentials stored as JSON
-    credentials = sa.Column(JsonBlob(), nullable=False)
-    
-    # Partition metadata
-    partition_metadata = sa.Column(JsonBlob(), nullable=True)
-    
-    # Status
-    status = sa.Column(sa.String(20), nullable=False)
-    
-    # Relationship to Project
-    project = orm.relationship("Project")
-
-class HSMPartitionSecret(ModelBase):
-    """Links secrets to specific HSM partitions."""
-    __tablename__ = 'hsm_partition_secrets'
-
-    id = sa.Column(sa.String(36), primary_key=True)
-    created_at = sa.Column(sa.DateTime, nullable=False)
-    
-    secret_id = sa.Column(sa.String(36), 
-                         sa.ForeignKey('secrets.id'), 
-                         nullable=False)
-    partition_id = sa.Column(sa.String(36), 
-                           sa.ForeignKey('hsm_partition_configs.id'), 
-                           nullable=False)
-    
-    # Reference to key in HSM (if applicable)
-    hsm_key_label = sa.Column(sa.String(255), nullable=True)
-    
-    # Relationships
-    secret = orm.relationship("Secret")
-    partition = orm.relationship("HSMPartitionConfig")
-
-
-class ProjectHSMPartition(BASE, ModelBase):
-    """Associates projects with their HSM partition configuration."""
-    __tablename__ = 'project_hsm_partitions'
-
     project_id = sa.Column(
         sa.String(36),
         sa.ForeignKey('projects.id'),
+        nullable=False,
         index=True,
-        nullable=False)
-
-    partition_id = sa.Column(
-        sa.String(36), 
-        sa.ForeignKey('hsm_partition_configs.id'),
-        index=True,
-        nullable=False)
-
-    project = orm.relationship('Project')
-    partition = orm.relationship('HSMPartitionConfig')
-
-    __table_args__ = (
-        sa.UniqueConstraint(
-            'project_id', name='_project_hsm_partition_uc'),
+    )
+    
+    # HSM partition details
+    slot_id = sa.Column(
+        sa.String(255),
+        nullable=False,
+    )
+    token_label = sa.Column(
+        sa.String(255),
+        nullable=False,
+    )
+    partition_label = sa.Column(
+        sa.String(255),
+        nullable=False,
+    )
+    
+    # Encrypted credentials stored as JSON
+    credentials = sa.Column(
+        JsonBlob(),
+        nullable=False,
+    )
+    
+    # Partition metadata
+    partition_metadata = sa.Column(
+        JsonBlob(),
+        nullable=True,
     )
 
-    def __init__(self, project_id=None, partition_id=None, check_exc=True):
-        """Initialize mapping."""
-        super(ProjectHSMPartition, self).__init__()
+    # Relationship to Project
+    project = orm.relationship("Project")
 
-        msg = u._("Must supply non-None {0} argument for ProjectHSMPartition entry.")
-
-        if project_id is None and check_exc:
-            raise exception.MissingArgumentError(msg.format("project_id"))
-        self.project_id = project_id
-
-        if partition_id is None and check_exc:
-            raise exception.MissingArgumentError(msg.format("partition_id")) 
-        self.partition_id = partition_id
-
-        self.status = States.ACTIVE
-
-    def _do_extra_dict_fields(self):
-        """Return dict of fields."""
-        return {
-            'project_id': self.project_id,
-            'partition_id': self.partition_id
-        }
+    __table_args__ = (
+        UniqueConstraint("project_id", "slot_id",
+                         name="_hsm_partition_config_project_slot_uc"),
+    )
 
 
 class SecretConsumerMetadatum(BASE, SoftDeleteMixIn, ModelBase):
