@@ -12,13 +12,14 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
+
 import threading
 from unittest import mock
 from barbican import i18n as u
 from oslo_config import cfg
 
 from barbican.common import config, exception
-from barbican.model.models import HSMPartitionConfig, ProjectHSMPartition, KEKDatum
+from barbican.model.models import HSMPartitionConfig, KEKDatum
 from barbican.plugin.crypto import hsm_partition_crypto, p11_crypto
 from barbican.plugin.crypto.base import ResponseDTO, KEKMetaDTO
 from barbican.tests import utils
@@ -125,15 +126,13 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
 
         plugin.project_hsm_repo = mock.MagicMock()
-        plugin.project_hsm_repo.get_by_project_id.return_value = ProjectHSMPartition(
-            project_id=self.project_id,
-            partition_id=self.partition_id,
-        )
-        plugin.hsm_partition_repo = mock.MagicMock()
-        plugin.hsm_partition_repo.get_by_id.return_value = HSMPartitionConfig(
-            project_id=self.project_id,
-            slot_id=self.slot_id,
-            token_label=self.token_label,
+        plugin.hsm_partition_config_repo = mock.MagicMock()
+        plugin.hsm_partition_config_repo.get_by_project_id.return_value = (
+            HSMPartitionConfig(
+                project_id=self.project_id,
+                slot_id=self.slot_id,
+                token_label=self.token_label,
+            )
         )
 
         partition = plugin._get_partition_for_project(self.project_id)
@@ -145,15 +144,13 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
     def test_get_partition_for_default_mapping(self):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
 
-        plugin.project_hsm_repo = mock.MagicMock()
-        plugin.project_hsm_repo.get_by_project_id.side_effect = Exception(
-            "Mapping not found"
-        )
-        plugin.hsm_partition_repo = mock.MagicMock()
-        plugin.hsm_partition_repo.get_by_id.return_value = HSMPartitionConfig(
-            project_id=self.project_id,
-            slot_id=self.slot_id,
-            token_label=self.token_label,
+        plugin.hsm_partition_config_repo = mock.MagicMock()
+        plugin.hsm_partition_config_repo.get_by_project_id.return_value = (
+            HSMPartitionConfig(
+                project_id=self.project_id,
+                slot_id=self.slot_id,
+                token_label=self.token_label,
+            )
         )
 
         partition = plugin._get_partition_for_project(self.project_id)
@@ -165,12 +162,11 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
     def test_get_partition_raises_error_for_no_mapping(self):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
 
-        plugin.project_hsm_repo = mock.MagicMock()
-        plugin.project_hsm_repo.get_by_project_id.side_effect = Exception(
-            "Mapping not found"
+        plugin.hsm_partition_config_repo = mock.MagicMock()
+        plugin.hsm_partition_config_repo.get_by_project_id.side_effect = (
+            exception.NotFound("Partition not found")
         )
-        plugin.hsm_partition_repo = mock.MagicMock()
-        plugin.hsm_partition_repo.get_by_id.side_effect = exception.NotFound(
+        plugin.hsm_partition_config_repo.get_by_id.side_effect = exception.NotFound(
             "Partition not found"
         )
 

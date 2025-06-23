@@ -1,3 +1,18 @@
+# Copyright (c) 2025 SAP SE
+# All Rights Reserved.
+#
+#    Licensed under the Apache License, Version 2.0 (the "License"); you may
+#    not use this file except in compliance with the License. You may obtain
+#    a copy of the License at
+#
+#         http://www.apache.org/licenses/LICENSE-2.0
+#
+#    Unless required by applicable law or agreed to in writing, software
+#    distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+#    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
+#    License for the specific language governing permissions and limitations
+#    under the License.
+
 from oslo_config import cfg
 
 from barbican import i18n as u
@@ -208,8 +223,9 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         self.pkek_cache_limit = self.conf.pkek_cache_limit
 
         # Initialize repository interfaces
-        self.hsm_partition_repo = repositories.get_hsm_partition_repository()
-        self.project_hsm_repo = repositories.get_project_hsm_repository()
+        self.hsm_partition_config_repo = (
+            repositories.get_hsm_partition_config_repository()
+        )
 
         # Runtime variables
         self.current_project_id = None
@@ -220,17 +236,18 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         if not project_id:
             raise ValueError(u._("Project ID is required"))
 
-        # Check for project-specific mapping
+        # Check for project-specific partition config
         try:
-            proj_mapping = self.project_hsm_repo.get_by_project_id(project_id)
-            return self.hsm_partition_repo.get_by_id(proj_mapping.partition_id)
+            return self.hsm_partition_config_repo.get_by_project_id(project_id)
         except Exception as e:
             LOG.warning(f"Error finding default partition: {e}, {type(e).__name__}")
 
         # Fall back to default if configured
         if self.conf.default_partition_id:
             try:
-                return self.hsm_partition_repo.get_by_id(self.conf.default_partition_id)
+                return self.hsm_partition_config_repo.get_by_id(
+                    self.conf.default_partition_id
+                )
             except exception.NotFound:
                 LOG.warning(
                     f"Default partition ID {self.conf.default_partition_id} not found"
