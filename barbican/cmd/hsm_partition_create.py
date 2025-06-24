@@ -165,33 +165,12 @@ def create_hsm_partition(args):
         session.flush()  # This will assign an ID to the partition if needed
         LOG.debug("Created HSM partition config with id: %s", hsm_partition_config.id)
 
-        # Step: Create project to HSM partition mapping
-        LOG.debug("Creating project to HSM partition mapping")
-
-        # Use the constructor correctly by providing required arguments
-        mapping = models.ProjectHSMPartition(
-            project_id=project.id,
-            partition_id=hsm_partition_config.id,
-            check_exc=False
-        )
-        # Set additional attributes
-        mapping.id = args.mapping_id or str(uuid.uuid4())
-        mapping.created_at = timeutils.utcnow()
-        mapping.updated_at = timeutils.utcnow()
-        mapping.status = models.States.ACTIVE
-        mapping.deleted = False
-
-        session.add(mapping)
-        session.flush()  # This will assign an ID to the mapping if needed
-        LOG.debug("Created mapping with id: %s", mapping.id)
-
         # Commit all changes
         session.commit()
 
         LOG.info("Successfully created HSM partition configuration:")
         LOG.info("  Project ID: %s (External ID: %s)", project.id, args.external_project_id)
         LOG.info("  Partition ID: %s (Label: %s)", hsm_partition_config.id, args.partition_label)
-        LOG.info("  Mapping ID: %s", mapping.id)
 
     except Exception as e:
         LOG.exception("Error creating HSM partition configuration: %s", e)
