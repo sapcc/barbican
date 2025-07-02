@@ -230,6 +230,9 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
     def _get_partition_for_project(self, project_id):
         """Get HSM partition configuration for a project."""
 
+        if project_id is None:
+            raise ValueError("No HSM partition mapping found for the project and no valid default partition is configured")
+
         # Check for project-specific partition config
         try:
             return self.hsm_partition_config_repo.get_by_project_id(project_id)
