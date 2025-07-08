@@ -179,21 +179,17 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
             self.conf = conf[self.section_name]
             LOG.info(f"Using HSM configuration section: {self.section_name}")
         except cfg.NoSuchOptError:
-            # Section doesn't exist - either create dynamically or use base
-            if self.store_plugin_name != "default":
-                LOG.warning(
-                    f"No config found for {self.section_name}, registering dynamically"
-                )
-                group = cfg.OptGroup(
-                    name=self.section_name,
-                    title=f"HSM Partition Crypto Plugin Options for {self.store_plugin_name}",
-                )
-                conf.register_group(group)
-                conf.register_opts(hsm_partition_crypto_plugin_opts, group=group)
-                self.conf = conf[self.section_name]
-            else:
-                LOG.warning("Using default HSM configuration section")
-                self.conf = conf["hsm_partition_crypto_plugin"]
+            # Section doesn't exist - create a new one dynamically
+            LOG.warning(
+                f"No config found for {self.section_name}, registering dynamically"
+            )
+            group = cfg.OptGroup(
+                name=self.section_name,
+                title=f"HSM Partition Crypto Plugin Options for {self.store_plugin_name}",
+            )
+            conf.register_group(group)
+            conf.register_opts(hsm_partition_crypto_plugin_opts, group=group)
+            self.conf = conf[self.section_name]
 
         # Initialize basic attributes from config
         self.library_path = None
@@ -233,8 +229,9 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
 
     def _get_partition_for_project(self, project_id):
         """Get HSM partition configuration for a project."""
-        if not project_id:
-            raise ValueError(u._("Project ID is required"))
+
+        if project_id is None:
+            raise ValueError("No HSM partition mapping found for the project and no valid default partition is configured")
 
         # Check for project-specific partition config
         try:
@@ -245,7 +242,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         # Fall back to default if configured
         if self.conf.default_partition_id:
             try:
-                return self.hsm_partition_config_repo.get_by_id(
+                return self.hsm_partition_config_repo.get(
                     self.conf.default_partition_id
                 )
             except exception.NotFound:
@@ -257,7 +254,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         # Nothing found
         raise ValueError(
             u._(
-                "No HSM partition mapping found for project and no valid default configured"
+                "No HSM partition mapping found for the project and no valid default partition is configured"
             )
         )
 
@@ -270,8 +267,6 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
 
         # Get partition config for the project
         partition = self._get_partition_for_project(project_id)
-        if not partition:
-            raise ValueError(u._("No HSM partition mapping found for project"))
 
         # Store current project and partition
         self.current_project_id = project_id
@@ -288,7 +283,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         self._configure_object_cache()
 
     def get_plugin_name(self):
-        """Gets user friendly plugin name."""
+        """Gets user-friendly plugin name."""
         return self.conf.plugin_name
 
     def encrypt(self, encrypt_dto, kek_meta_dto, project_id):
@@ -304,26 +299,22 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         )
 
     def bind_kek_metadata(self, kek_meta_dto):
-        # Extract project_id from the kek_meta_dto
-        if hasattr(kek_meta_dto, "project_id"):
-            project_id = kek_meta_dto.project_id
-        else:
-            # For the bind_kek_metadata case, get project_id from kek_label
-            # The format is "project-{external_id}-key-{uuid}"
-            try:
-                label_parts = kek_meta_dto.kek_label.split("-")
-                if len(label_parts) >= 4 and label_parts[0] == "project":
-                    project_id = label_parts[1]
-                else:
-                    # If we can't determine project_id, use default partition
-                    LOG.warning(
-                        "Cannot determine project_id from kek_label: %s, using default partition",
-                        kek_meta_dto.kek_label,
-                    )
-                    project_id = None
-            except (AttributeError, IndexError):
-                LOG.warning("Invalid kek_label format, using default partition")
-                project_id = None
+        # Extract project_id from the kek_label in kek_meta_dto
+        # The format is "project-{external_id}-key-{uuid}"
+        try:
+            label_parts = kek_meta_dto.kek_label.split("-")
+            if len(label_parts) >= 4 and label_parts[0] == "project":
+                project_id = label_parts[1]
+            else:
+                # If we can't determine project_id, use default partition
+                LOG.warning(
+                    "Cannot determine project_id from kek_label: %s, using default partition",
+                    kek_meta_dto.kek_label,
+                )
+                project_id = "default"
+        except (AttributeError, IndexError):
+            LOG.warning("Invalid kek_label format, using default partition")
+            project_id = "default"
 
         self._configure_pkcs11(project_id)
         return super(HSMPartitionCryptoPlugin, self).bind_kek_metadata(kek_meta_dto)

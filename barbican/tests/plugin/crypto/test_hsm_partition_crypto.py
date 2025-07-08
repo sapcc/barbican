@@ -166,7 +166,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         plugin.hsm_partition_config_repo.get_by_project_id.side_effect = (
             exception.NotFound("Partition not found")
         )
-        plugin.hsm_partition_config_repo.get_by_id.side_effect = exception.NotFound(
+        plugin.hsm_partition_config_repo.get.side_effect = exception.NotFound(
             "Partition not found"
         )
 
@@ -188,8 +188,13 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
 
     def test_configure_pkcs11_raises_error_for_no_partition_mapping(self):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
-        plugin._get_partition_for_project = mock.MagicMock()
-        plugin._get_partition_for_project.return_value = None
+        plugin.hsm_partition_config_repo = mock.MagicMock()
+        plugin.hsm_partition_config_repo.get_by_project_id.side_effect = (
+            exception.NotFound("Partition not found")
+        )
+        plugin.hsm_partition_config_repo.get.side_effect = exception.NotFound(
+            "Partition not found"
+        )
 
         self.assertRaises(ValueError, plugin._configure_pkcs11, self.project_id)
 
@@ -349,7 +354,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         ) as mock_bind_kek_metadata:
             plugin.bind_kek_metadata(kek_meta_dto)
 
-        plugin._configure_pkcs11.assert_called_once_with(None)
+        plugin._configure_pkcs11.assert_called_once_with("default")
         self.assertEqual(1, mock_bind_kek_metadata.call_count)
 
     def test_generate_symmetric(self):
