@@ -39,9 +39,13 @@ def upgrade():
         sa.Column("slot_id", sa.String(length=255), nullable=False),
         sa.Column("token_label", sa.String(length=255), nullable=False),
         sa.Column("partition_label", sa.String(length=255), nullable=False),
-        sa.Column("credentials", barbican.model.models.JsonBlob(), nullable=False),
         sa.Column(
-            "partition_metadata", barbican.model.models.JsonBlob(), nullable=True
+            "credentials", barbican.model.models.JsonBlob(), nullable=False
+        ),
+        sa.Column(
+            "partition_metadata",
+            barbican.model.models.JsonBlob(),
+            nullable=True,
         ),
         sa.Column("id", sa.String(length=36), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=False),
@@ -55,7 +59,9 @@ def upgrade():
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
-            "project_id", "slot_id", name="_hsm_partition_config_project_slot_uc"
+            "project_id",
+            "slot_id",
+            name="_hsm_partition_config_project_slot_uc",
         ),
     )
     op.create_index(

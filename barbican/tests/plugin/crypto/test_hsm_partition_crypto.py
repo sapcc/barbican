@@ -15,17 +15,22 @@
 
 import threading
 from unittest import mock
-from barbican import i18n as u
-from oslo_config import cfg
 
-from barbican.common import config, exception
-from barbican.model.models import HSMPartitionConfig, KEKDatum
-from barbican.plugin.crypto import hsm_partition_crypto, p11_crypto
-from barbican.plugin.crypto.base import ResponseDTO, KEKMetaDTO
+from barbican.common import config
+from barbican.common import exception
+from barbican import i18n as u
+from barbican.model.models import HSMPartitionConfig
+from barbican.model.models import KEKDatum
+from barbican.plugin.crypto.base import KEKMetaDTO
+from barbican.plugin.crypto.base import ResponseDTO
+from barbican.plugin.crypto import hsm_partition_crypto
+from barbican.plugin.crypto import p11_crypto
 from barbican.tests import utils
+from oslo_config import cfg
 
 
 class PluginOperationThread(threading.Thread):
+
     def __init__(self, index, results):
         threading.Thread.__init__(self)
         self.index = index
@@ -34,14 +39,13 @@ class PluginOperationThread(threading.Thread):
         self.plugin._configure_pkcs11 = mock.MagicMock()
 
     def run(self):
-        with mock.patch.object(p11_crypto.P11CryptoPlugin, "encrypt") as mock_encrypt:
+        with mock.patch.object(p11_crypto.P11CryptoPlugin,
+                               "encrypt") as mock_encrypt:
             mock_encrypt.return_value = ResponseDTO(
                 cypher_text=f"cypher_text_{self.index}".encode("utf-8"),
-                kek_meta_extended=(
-                    '{"iv":"AAAA",'
-                    '"mechanism":"CKM_AES_CBC",'
-                    '"key_wrap_mechanism":"CKM_AES_CBC_PAD"}'
-                ),
+                kek_meta_extended=('{"iv":"AAAA",'
+                                   '"mechanism":"CKM_AES_CBC",'
+                                   '"key_wrap_mechanism":"CKM_AES_CBC_PAD"}'),
             )
 
             self.results[self.index] = self.plugin.encrypt(
@@ -52,11 +56,13 @@ class PluginOperationThread(threading.Thread):
 
 
 class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
+
     def setUp(self):
         super(WhenTestingHSMPartitionCryptoPlugin, self).setUp()
 
         self.conf = config.new_config()
-        self.conf.register_group(hsm_partition_crypto.hsm_partition_crypto_plugin_group)
+        self.conf.register_group(
+            hsm_partition_crypto.hsm_partition_crypto_plugin_group)
         self.conf.register_opts(
             hsm_partition_crypto.hsm_partition_crypto_plugin_opts,
             group=hsm_partition_crypto.hsm_partition_crypto_plugin_group,
@@ -71,14 +77,14 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         self.library_path = "test_library_path"
         self.login = "test_password"
         self.cypher_text = b"cypher_text"
-        self.kek_meta_extended = (
-            '{"iv":"AAAA",'
-            '"mechanism":"CKM_AES_CBC",'
-            '"key_wrap_mechanism":"CKM_AES_CBC_PAD"}'
-        )
+        self.kek_meta_extended = ('{"iv":"AAAA",'
+                                  '"mechanism":"CKM_AES_CBC",'
+                                  '"key_wrap_mechanism":"CKM_AES_CBC_PAD"}')
 
         self.conf.hsm_partition_crypto_plugin.plugin_name = self.plugin_name
-        self.conf.hsm_partition_crypto_plugin.default_partition_id = self.partition_id
+        self.conf.hsm_partition_crypto_plugin.default_partition_id = (
+            self.partition_id
+        )
 
     def test_init_with_global_conf(self):
         store_plugin_name = "default"
@@ -96,12 +102,11 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         plugin_group = cfg.OptGroup(name=section_name)
         self.conf.register_group(plugin_group)
         self.conf.register_opts(
-            hsm_partition_crypto.hsm_partition_crypto_plugin_opts, group=plugin_group
-        )
+            hsm_partition_crypto.hsm_partition_crypto_plugin_opts,
+            group=plugin_group)
 
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(
-            conf=self.conf, store_plugin_name=store_plugin_name
-        )
+            conf=self.conf, store_plugin_name=store_plugin_name)
 
         self.assertEqual(section_name, plugin.section_name)
         self.assertEqual(store_plugin_name, plugin.store_plugin_name)
@@ -111,8 +116,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         section_name = f"hsm_partition_crypto_plugin:{store_plugin_name}"
 
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(
-            conf=self.conf, store_plugin_name=store_plugin_name
-        )
+            conf=self.conf, store_plugin_name=store_plugin_name)
 
         self.assertEqual(section_name, plugin.section_name)
         self.assertEqual(store_plugin_name, plugin.store_plugin_name)
@@ -132,8 +136,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
                 project_id=self.project_id,
                 slot_id=self.slot_id,
                 token_label=self.token_label,
-            )
-        )
+            ))
 
         partition = plugin._get_partition_for_project(self.project_id)
 
@@ -150,8 +153,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
                 project_id=self.project_id,
                 slot_id=self.slot_id,
                 token_label=self.token_label,
-            )
-        )
+            ))
 
         partition = plugin._get_partition_for_project(self.project_id)
 
@@ -164,15 +166,12 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
 
         plugin.hsm_partition_config_repo = mock.MagicMock()
         plugin.hsm_partition_config_repo.get_by_project_id.side_effect = (
-            exception.NotFound("Partition not found")
-        )
+            exception.NotFound("Partition not found"))
         plugin.hsm_partition_config_repo.get.side_effect = exception.NotFound(
-            "Partition not found"
-        )
+            "Partition not found")
 
-        self.assertRaises(
-            ValueError, plugin._get_partition_for_project, self.project_id
-        )
+        self.assertRaises(ValueError, plugin._get_partition_for_project,
+                          self.project_id)
 
     def test_configure_pkcs11_is_already_configured(self):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
@@ -190,13 +189,12 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
         plugin.hsm_partition_config_repo = mock.MagicMock()
         plugin.hsm_partition_config_repo.get_by_project_id.side_effect = (
-            exception.NotFound("Partition not found")
-        )
+            exception.NotFound("Partition not found"))
         plugin.hsm_partition_config_repo.get.side_effect = exception.NotFound(
-            "Partition not found"
-        )
+            "Partition not found")
 
-        self.assertRaises(ValueError, plugin._configure_pkcs11, self.project_id)
+        self.assertRaises(ValueError, plugin._configure_pkcs11,
+                          self.project_id)
 
     def test_configure_pkcs11(self):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
@@ -205,7 +203,10 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
             project_id=self.project_id,
             slot_id=self.slot_id,
             token_label=self.token_label,
-            credentials={"library_path": self.library_path, "password": self.login},
+            credentials={
+                "library_path": self.library_path,
+                "password": self.login
+            },
         )
         plugin._create_pkcs11 = mock.MagicMock()
         plugin._create_pkcs11.return_value = self.pkcs11
@@ -230,14 +231,13 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         plugin_group = cfg.OptGroup(name=plugin_group_name)
         self.conf.register_group(plugin_group)
         self.conf.register_opts(
-            hsm_partition_crypto.hsm_partition_crypto_plugin_opts, group=plugin_group
-        )
+            hsm_partition_crypto.hsm_partition_crypto_plugin_opts,
+            group=plugin_group)
 
         self.conf[plugin_group_name].plugin_name = self.plugin_name
 
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(
-            conf=self.conf, store_plugin_name=store_plugin_name
-        )
+            conf=self.conf, store_plugin_name=store_plugin_name)
 
         self.assertEqual(self.plugin_name, plugin.get_plugin_name())
 
@@ -246,7 +246,8 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
 
         plugin._configure_pkcs11 = mock.MagicMock()
 
-        with mock.patch.object(p11_crypto.P11CryptoPlugin, "encrypt") as mock_encrypt:
+        with mock.patch.object(p11_crypto.P11CryptoPlugin,
+                               "encrypt") as mock_encrypt:
             mock_encrypt.return_value = ResponseDTO(
                 cypher_text=self.cypher_text,
                 kek_meta_extended=self.kek_meta_extended,
@@ -261,7 +262,8 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         self.assertEqual(1, plugin._configure_pkcs11.call_count)
         self.assertEqual(1, mock_encrypt.call_count)
         self.assertEqual(self.cypher_text, response_dto.cypher_text)
-        self.assertEqual(self.kek_meta_extended, response_dto.kek_meta_extended)
+        self.assertEqual(self.kek_meta_extended,
+                         response_dto.kek_meta_extended)
 
     def test_encrypt_with_multi_threads(self):
         results = [None] * 10
@@ -273,14 +275,14 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
 
         # Verify all threads return corresponding response
         for i in range(10):
-            self.assertEqual(f"cypher_text_{i}".encode("utf-8"), results[i].cypher_text)
+            self.assertEqual(f"cypher_text_{i}".encode("utf-8"),
+                             results[i].cypher_text)
 
     def test_encrypt_raises_error_for_misconfigured_partition(self):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin()
         plugin._configure_pkcs11 = mock.MagicMock()
         plugin._configure_pkcs11.side_effect = ValueError(
-            u._("No HSM partition mapping found for project")
-        )
+            u._("No HSM partition mapping found for project"))
 
         self.assertRaises(
             ValueError,
@@ -295,7 +297,8 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
 
         plugin._configure_pkcs11 = mock.MagicMock()
 
-        with mock.patch.object(p11_crypto.P11CryptoPlugin, "decrypt") as mock_decrypt:
+        with mock.patch.object(p11_crypto.P11CryptoPlugin,
+                               "decrypt") as mock_decrypt:
             mock_decrypt.return_value = b"0"
 
             pt = plugin.decrypt(
@@ -313,8 +316,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin()
         plugin._configure_pkcs11 = mock.MagicMock()
         plugin._configure_pkcs11.side_effect = ValueError(
-            u._("No HSM partition mapping found for project")
-        )
+            u._("No HSM partition mapping found for project"))
 
         self.assertRaises(
             ValueError,
@@ -330,13 +332,15 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
 
         plugin._configure_pkcs11 = mock.MagicMock()
         kek_datum = KEKDatum(
-            kek_label=f"project-{self.project_id}-key-9f4d7025-ea84-454f-8b3a-3e9bb594c777"
+            kek_label=(
+                f"project-{self.project_id}-key-"
+                "9f4d7025-ea84-454f-8b3a-3e9bb594c777"
+            )
         )
         kek_meta_dto = KEKMetaDTO(kek_datum)
 
-        with mock.patch.object(
-            p11_crypto.P11CryptoPlugin, "bind_kek_metadata"
-        ) as mock_bind_kek_metadata:
+        with mock.patch.object(p11_crypto.P11CryptoPlugin,
+                               "bind_kek_metadata") as mock_bind_kek_metadata:
             plugin.bind_kek_metadata(kek_meta_dto)
 
         plugin._configure_pkcs11.assert_called_once_with(self.project_id)
@@ -349,9 +353,8 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         kek_datum = KEKDatum()
         kek_meta_dto = KEKMetaDTO(kek_datum)
 
-        with mock.patch.object(
-            p11_crypto.P11CryptoPlugin, "bind_kek_metadata"
-        ) as mock_bind_kek_metadata:
+        with mock.patch.object(p11_crypto.P11CryptoPlugin,
+                               "bind_kek_metadata") as mock_bind_kek_metadata:
             plugin.bind_kek_metadata(kek_meta_dto)
 
         plugin._configure_pkcs11.assert_called_once_with("default")
@@ -363,8 +366,8 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         plugin._configure_pkcs11 = mock.MagicMock()
 
         with mock.patch.object(
-            p11_crypto.P11CryptoPlugin, "generate_symmetric"
-        ) as mock_generate_symmetric:
+                p11_crypto.P11CryptoPlugin,
+                "generate_symmetric") as mock_generate_symmetric:
             mock_generate_symmetric.return_value = ResponseDTO(
                 cypher_text=self.cypher_text,
                 kek_meta_extended=self.kek_meta_extended,
@@ -379,14 +382,14 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         self.assertEqual(1, plugin._configure_pkcs11.call_count)
         self.assertEqual(1, mock_generate_symmetric.call_count)
         self.assertEqual(self.cypher_text, response_dto.cypher_text)
-        self.assertEqual(self.kek_meta_extended, response_dto.kek_meta_extended)
+        self.assertEqual(self.kek_meta_extended,
+                         response_dto.kek_meta_extended)
 
     def test_generate_symmetric_raises_error_for_misconfigure_partition(self):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin()
         plugin._configure_pkcs11 = mock.MagicMock()
         plugin._configure_pkcs11.side_effect = ValueError(
-            u._("No HSM partition mapping found for project")
-        )
+            u._("No HSM partition mapping found for project"))
 
         self.assertRaises(
             ValueError,
@@ -409,16 +412,15 @@ class WhenTestingVendorPluginConfigurationIsolation(utils.BaseTestCase):
         utimaco_plugin = hsm_partition_crypto.UtimacoHSMPartitionCryptoPlugin()
         thales_plugin = hsm_partition_crypto.ThalesHSMPartitionCryptoPlugin()
 
-        self.assertEqual(
-            "hsm_partition_crypto_plugin:utimaco_hsm", utimaco_plugin.section_name
-        )
-        self.assertEqual(
-            "hsm_partition_crypto_plugin:thales_hsm", thales_plugin.section_name
-        )
-        self.assertNotEqual(utimaco_plugin.section_name, thales_plugin.section_name)
+        self.assertEqual("hsm_partition_crypto_plugin:utimaco_hsm",
+                         utimaco_plugin.section_name)
+        self.assertEqual("hsm_partition_crypto_plugin:thales_hsm",
+                         thales_plugin.section_name)
+        self.assertNotEqual(utimaco_plugin.section_name,
+                            thales_plugin.section_name)
 
     def test_vendor_plugins_configuration_isolation(self):
-        """Test that vendor plugins read from isolated configuration sections."""
+        """Test that vendor plugins read from isolated config sections."""
         # Register both vendor-specific configuration sections
         utimaco_section = "hsm_partition_crypto_plugin:utimaco_hsm"
         thales_section = "hsm_partition_crypto_plugin:thales_hsm"
@@ -430,33 +432,30 @@ class WhenTestingVendorPluginConfigurationIsolation(utils.BaseTestCase):
         self.conf.register_group(thales_group)
 
         self.conf.register_opts(
-            hsm_partition_crypto.hsm_partition_crypto_plugin_opts, group=utimaco_group
-        )
+            hsm_partition_crypto.hsm_partition_crypto_plugin_opts,
+            group=utimaco_group)
         self.conf.register_opts(
-            hsm_partition_crypto.hsm_partition_crypto_plugin_opts, group=thales_group
-        )
+            hsm_partition_crypto.hsm_partition_crypto_plugin_opts,
+            group=thales_group)
 
         # Set different configurations for each vendor
         self.conf[utimaco_section].plugin_name = "Utimaco Plugin"
-        self.conf[utimaco_section].default_partition_id = "utimaco_partition_123"
+        self.conf[
+            utimaco_section].default_partition_id = "utimaco_partition_123"
 
         self.conf[thales_section].plugin_name = "Thales Plugin"
         self.conf[thales_section].default_partition_id = "thales_partition_456"
 
         # Create plugins and verify they read from their respective sections
         utimaco_plugin = hsm_partition_crypto.UtimacoHSMPartitionCryptoPlugin(
-            conf=self.conf
-        )
+            conf=self.conf)
         thales_plugin = hsm_partition_crypto.ThalesHSMPartitionCryptoPlugin(
-            conf=self.conf
-        )
+            conf=self.conf)
 
         self.assertEqual("Utimaco Plugin", utimaco_plugin.get_plugin_name())
         self.assertEqual("Thales Plugin", thales_plugin.get_plugin_name())
 
-        self.assertEqual(
-            "utimaco_partition_123", utimaco_plugin.conf.default_partition_id
-        )
-        self.assertEqual(
-            "thales_partition_456", thales_plugin.conf.default_partition_id
-        )
+        self.assertEqual("utimaco_partition_123",
+                         utimaco_plugin.conf.default_partition_id)
+        self.assertEqual("thales_partition_456",
+                         thales_plugin.conf.default_partition_id)
