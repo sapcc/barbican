@@ -99,7 +99,8 @@ def generate_safe_exception_message(operation_name, excep):
         message = u._(
             '{operation} attempt not allowed - '
             'please ensure you have the necessary '
-            'keymanager_viewer or keymanager_admin project roles for this operation'
+            'keymanager_viewer or keymanager_admin '
+            'project roles for this operation'
         ).format(operation=operation_name)
         status = 403
 

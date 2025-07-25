@@ -13,13 +13,15 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from barbican.tests import database_utils
-from barbican.model import repositories
 from barbican.common import exception
 from barbican.model import models
+from barbican.model import repositories
+from barbican.tests import database_utils
 
 
-class WhenTestingHSMPartitionConfigRepository(database_utils.RepositoryTestCase):
+class WhenTestingHSMPartitionConfigRepository(
+    database_utils.RepositoryTestCase
+):
     def setUp(self):
         super(WhenTestingHSMPartitionConfigRepository, self).setUp()
         self.repo = repositories.HSMPartitionConfigRepo()
@@ -46,14 +48,20 @@ class WhenTestingHSMPartitionConfigRepository(database_utils.RepositoryTestCase)
             suppress_exception=False,
         )
 
-        self.assertEqual(self.hsm_partition_config.id, hsm_partition_config_get.id)
+        self.assertEqual(
+            self.hsm_partition_config.id, hsm_partition_config_get.id
+        )
 
     def test_get_by_project_id_returns_result_for_project_id(self):
         hsm_partition_config_get = self.repo.get_by_project_id(
-            project_id=self.project.id, suppress_exception=False, session=self.session
+            project_id=self.project.id,
+            suppress_exception=False,
+            session=self.session,
         )
 
-        self.assertEqual(self.hsm_partition_config.id, hsm_partition_config_get.id)
+        self.assertEqual(
+            self.hsm_partition_config.id, hsm_partition_config_get.id
+        )
 
     def test_get_by_project_id_returns_result_for_external_id(self):
         self.project.project_id = "my project id"
@@ -65,11 +73,15 @@ class WhenTestingHSMPartitionConfigRepository(database_utils.RepositoryTestCase)
             session=self.session,
         )
 
-        self.assertEqual(self.hsm_partition_config.id, hsm_partition_config_get.id)
+        self.assertEqual(
+            self.hsm_partition_config.id, hsm_partition_config_get.id
+        )
 
     def test_get_by_project_id_returns_no_result_and_no_exception(self):
         entity = self.repo.get_by_project_id(
-            project_id="my project id", suppress_exception=True, session=self.session
+            project_id="my project id",
+            suppress_exception=True,
+            session=self.session,
         )
 
         self.assertEqual(None, entity)

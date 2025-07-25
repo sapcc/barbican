@@ -15,8 +15,10 @@
 
 from oslo_config import cfg
 
+from barbican.common import config
+from barbican.common import exception
+from barbican.common import utils
 from barbican import i18n as u
-from barbican.common import config, exception, utils
 from barbican.model import repositories
 from barbican.plugin.crypto import p11_crypto
 
@@ -25,7 +27,8 @@ CONF = config.new_config()
 
 # Register hsm partition plugin options
 hsm_partition_crypto_plugin_group = cfg.OptGroup(
-    name="hsm_partition_crypto_plugin", title="HSM Partition Crypto Plugin Options"
+    name="hsm_partition_crypto_plugin",
+    title="HSM Partition Crypto Plugin Options",
 )
 hsm_partition_crypto_plugin_opts = [
     cfg.StrOpt(
@@ -38,20 +41,33 @@ hsm_partition_crypto_plugin_opts = [
         help=u._("Default HSM partition ID if no project mapping exists"),
         default=None,
     ),
-    cfg.StrOpt("mkek_label", help=u._("Master KEK label (as stored in the HSM)")),
-    cfg.IntOpt(
-        "mkek_length", default=32, min=1, help=u._("Master KEK length in bytes.")
+    cfg.StrOpt(
+        "mkek_label", help=u._("Master KEK label (as stored in the HSM)")
     ),
-    cfg.StrOpt("hmac_label", help=u._("Master HMAC Key label (as stored in the HSM)")),
-    cfg.BoolOpt("rw_session", help=u._("Flag for Read/Write Sessions"), default=True),
-    cfg.IntOpt("pkek_length", help=u._("Project KEK length in bytes."), default=32),
+    cfg.IntOpt(
+        "mkek_length",
+        default=32,
+        min=1,
+        help=u._("Master KEK length in bytes."),
+    ),
+    cfg.StrOpt(
+        "hmac_label", help=u._("Master HMAC Key label (as stored in the HSM)")
+    ),
+    cfg.BoolOpt(
+        "rw_session", help=u._("Flag for Read/Write Sessions"), default=True
+    ),
+    cfg.IntOpt(
+        "pkek_length", help=u._("Project KEK length in bytes."), default=32
+    ),
     cfg.IntOpt(
         "pkek_cache_ttl",
         help=u._("Project KEK Cache Time To Live, in seconds"),
         default=900,
     ),
     cfg.IntOpt(
-        "pkek_cache_limit", help=u._("Project KEK Cache Item Limit"), default=100
+        "pkek_cache_limit",
+        help=u._("Project KEK Cache Item Limit"),
+        default=100,
     ),
     cfg.StrOpt(
         "encryption_mechanism",
@@ -62,7 +78,9 @@ hsm_partition_crypto_plugin_opts = [
     cfg.StrOpt("hmac_key_type", help=u._("HMAC Key Type"), default="CKK_AES"),
     cfg.StrOpt(
         "hmac_keygen_mechanism",
-        help=u._("HMAC Key Generation Algorithm used to create the master HMAC Key."),
+        help=u._(
+            "HMAC Key Generation Algorithm used to create the master HMAC Key."
+        ),
         default="CKM_AES_KEY_GEN",
     ),
     cfg.StrOpt(
@@ -82,10 +100,14 @@ hsm_partition_crypto_plugin_opts = [
         default=True,
     ),
     cfg.StrOpt(
-        "seed_file", help=u._("File to pull entropy for seeding RNG"), default=""
+        "seed_file",
+        help=u._("File to pull entropy for seeding RNG"),
+        default="",
     ),
     cfg.IntOpt(
-        "seed_length", help=u._("Amount of data to read from file for seed"), default=32
+        "seed_length",
+        help=u._("Amount of data to read from file for seed"),
+        default=32,
     ),
     cfg.BoolOpt(
         "aes_gcm_generate_iv",
@@ -96,7 +118,8 @@ hsm_partition_crypto_plugin_opts = [
     cfg.BoolOpt(
         "always_set_cka_sensitive",
         help=u._(
-            "Always set CKA_SENSITIVE=CK_TRUE including CKA_EXTRACTABLE=CK_TRUE keys."
+            "Always set CKA_SENSITIVE=CK_TRUE "
+            "including CKA_EXTRACTABLE=CK_TRUE keys."
         ),
         default=True,
     ),
@@ -122,14 +145,19 @@ def register_hsm_vendor_sections():
 
         # Create a new option group for the vendor
         vendor_group = cfg.OptGroup(
-            name=section_name, title=f"HSM Partition Crypto Plugin Options for {vendor}"
+            name=section_name,
+            title=f"HSM Partition Crypto Plugin Options for {vendor}",
         )
 
         # Register the group and options
         CONF.register_group(vendor_group)
-        CONF.register_opts(hsm_partition_crypto_plugin_opts, group=vendor_group)
+        CONF.register_opts(
+            hsm_partition_crypto_plugin_opts, group=vendor_group
+        )
 
-        LOG.debug(f"Registered HSM vendor configuration section: {section_name}")
+        LOG.debug(
+            f"Registered HSM vendor configuration section: {section_name}"
+        )
 
 
 # Register all vendor sections
@@ -147,15 +175,20 @@ def list_opts():
 
 
 class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
-    """PKCS11 crypto plugin for HSMaaS. Inherits from P11CryptoPlugin
+    """PKCS11 crypto plugin for HSMaaS.
 
-    This plugin extends the base PKCS11 plugin to support per-project HSM
-    partitions. Each project is mapped to its own HSM partition with isolated
-    keys and credentials.
+    Inherits from P11CryptoPlugin. This plugin extends the base PKCS11 plugin
+    to support per-project HSM partitions. Each project is mapped to its own
+    HSM partition with isolated keys and credentials.
     """
 
-    def __init__(self, conf=None, ffi=None, pkcs11=None, store_plugin_name=None):
-        """Initialize plugin using dynamic config based on secret store name."""
+    def __init__(
+        self, conf=None, ffi=None, pkcs11=None, store_plugin_name=None
+    ):
+        """Initialize plugin using dynamic config.
+
+        This uses dynamic config based on secret store name.
+        """
 
         # Use the global CONF if none provided
         if conf is None:
@@ -165,7 +198,9 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         self.store_plugin_name = store_plugin_name or "default"
 
         # Build section name based on secret store
-        self.section_name = f"hsm_partition_crypto_plugin:{self.store_plugin_name}"
+        self.section_name = (
+            f"hsm_partition_crypto_plugin:{self.store_plugin_name}"
+        )
 
         # If this is a default instance (no specific store), use base config
         if self.store_plugin_name == "default":
@@ -181,11 +216,13 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         except cfg.NoSuchOptError:
             # Section doesn't exist - create a new one dynamically
             LOG.warning(
-                f"No config found for {self.section_name}, registering dynamically"
+                f"No config found for {self.section_name}, "
+                "registering dynamically"
             )
             group = cfg.OptGroup(
                 name=self.section_name,
-                title=f"HSM Partition Crypto Plugin Options for {self.store_plugin_name}",
+                title=f"HSM Partition "
+                f"Crypto Plugin Options for {self.store_plugin_name}",
             )
             conf.register_group(group)
             conf.register_opts(hsm_partition_crypto_plugin_opts, group=group)
@@ -231,13 +268,18 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         """Get HSM partition configuration for a project."""
 
         if project_id is None:
-            raise ValueError("No HSM partition mapping found for the project and no valid default partition is configured")
+            raise ValueError(
+                "No HSM partition mapping found for the project "
+                "and no valid default partition is configured"
+            )
 
         # Check for project-specific partition config
         try:
             return self.hsm_partition_config_repo.get_by_project_id(project_id)
         except Exception as e:
-            LOG.warning(f"Error finding default partition: {e}, {type(e).__name__}")
+            LOG.warning(
+                f"Error finding default partition: {e}, {type(e).__name__}"
+            )
 
         # Fall back to default if configured
         if self.conf.default_partition_id:
@@ -247,14 +289,16 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
                 )
             except exception.NotFound:
                 LOG.warning(
-                    f"Default partition ID {self.conf.default_partition_id} not found"
+                    f"Default partition ID {self.conf.default_partition_id}"
+                    "not found"
                 )
                 pass
 
         # Nothing found
         raise ValueError(
             u._(
-                "No HSM partition mapping found for the project and no valid default partition is configured"
+                "No HSM partition mapping found for the project "
+                "and no valid default partition is configured"
             )
         )
 
@@ -276,7 +320,9 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         self.library_path = partition.credentials["library_path"]
         self.login = partition.credentials["password"]
         self.slot_id = int(partition.slot_id)
-        self.token_labels = [partition.token_label] if partition.token_label else None
+        self.token_labels = (
+            [partition.token_label] if partition.token_label else None
+        )
 
         # Create new PKCS11 instance
         self.pkcs11 = self._create_pkcs11(None)
@@ -292,7 +338,9 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
             encrypt_dto, kek_meta_dto, project_id
         )
 
-    def decrypt(self, decrypt_dto, kek_meta_dto, kek_meta_extended, project_id):
+    def decrypt(
+        self, decrypt_dto, kek_meta_dto, kek_meta_extended, project_id
+    ):
         self._configure_pkcs11(project_id)
         return super(HSMPartitionCryptoPlugin, self).decrypt(
             decrypt_dto, kek_meta_dto, kek_meta_extended, project_id
@@ -308,7 +356,8 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
             else:
                 # If we can't determine project_id, use default partition
                 LOG.warning(
-                    "Cannot determine project_id from kek_label: %s, using default partition",
+                    "Cannot determine project_id from kek_label: %s, "
+                    "using default partition",
                     kek_meta_dto.kek_label,
                 )
                 project_id = "default"
@@ -317,7 +366,9 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
             project_id = "default"
 
         self._configure_pkcs11(project_id)
-        return super(HSMPartitionCryptoPlugin, self).bind_kek_metadata(kek_meta_dto)
+        return super(HSMPartitionCryptoPlugin, self).bind_kek_metadata(
+            kek_meta_dto
+        )
 
     def generate_symmetric(self, generate_dto, kek_meta_dto, project_id):
         self._configure_pkcs11(project_id)
@@ -327,6 +378,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
 
 
 class UtimacoHSMPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
+
     """Utimaco HSM Partition Crypto Plugin.
 
     This is a specialized version of HSMPartitionCryptoPlugin configured
@@ -341,6 +393,7 @@ class UtimacoHSMPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
 
 
 class ThalesHSMPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
+
     """Thales HSM Partition Crypto Plugin.
 
     This is a specialized version of HSMPartitionCryptoPlugin configured
