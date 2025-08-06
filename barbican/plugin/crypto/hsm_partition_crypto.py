@@ -135,7 +135,7 @@ hsm_partition_crypto_plugin_opts = [
 
 
 # Register Vendor-specific sections
-def register_hsm_vendor_sections():
+def register_opts_for_hsm_vendors(conf):
     # Define vendor HSMs that you want to support
     vendors = ["thales_hsm", "utimaco_hsm"]
 
@@ -150,8 +150,8 @@ def register_hsm_vendor_sections():
         )
 
         # Register the group and options
-        CONF.register_group(vendor_group)
-        CONF.register_opts(
+        conf.register_group(vendor_group)
+        conf.register_opts(
             hsm_partition_crypto_plugin_opts, group=vendor_group
         )
 
@@ -161,7 +161,7 @@ def register_hsm_vendor_sections():
 
 
 # Register all vendor sections
-register_hsm_vendor_sections()
+register_opts_for_hsm_vendors(CONF)
 
 CONF.register_group(hsm_partition_crypto_plugin_group)
 CONF.register_opts(
@@ -378,7 +378,6 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
 
 
 class UtimacoHSMPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
-
     """Utimaco HSM Partition Crypto Plugin.
 
     This is a specialized version of HSMPartitionCryptoPlugin configured
@@ -393,7 +392,6 @@ class UtimacoHSMPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
 
 
 class ThalesHSMPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
-
     """Thales HSM Partition Crypto Plugin.
 
     This is a specialized version of HSMPartitionCryptoPlugin configured
