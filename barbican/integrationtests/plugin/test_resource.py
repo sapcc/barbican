@@ -21,11 +21,11 @@ from argparse import Namespace
 from enum import StrEnum
 
 from barbican.cmd.hsm_partition_create import create_hsm_partition
-from barbican.common import config, resources
+from barbican.common import config, exception, resources
 from barbican.model import models, repositories
 from barbican.model.models import States
 from barbican.plugin.crypto import hsm_partition_crypto, p11_crypto, pkcs11
-from barbican.plugin.resources import store_secret
+from barbican.plugin.resources import delete_secret, get_secret, store_secret
 
 
 class HSMVendor(StrEnum):
@@ -94,12 +94,7 @@ class WhenTestingPluginResourceWithSoftHSM(unittest.TestCase):
         cls.project_store_repo = (
             repositories.get_project_secret_store_repository()
         )
-        cls.hsm_partition_configs_repo = (
-            repositories.get_hsm_partition_config_repository()
-        )
-        cls.kek_data_repo = repositories.get_kek_datum_repository()
-        cls.secret_meta_repo = repositories.get_secret_meta_repository()
-        cls.encrypted_data_repo = repositories.get_encrypted_datum_repository()
+        cls.secret_repo = repositories.get_secret_repository()
 
     @classmethod
     def tearDownClass(cls):
@@ -196,7 +191,7 @@ class WhenTestingPluginResourceWithSoftHSM(unittest.TestCase):
         return False
 
     def _create_project_secret_store_mapping(
-            self, project_name: str, hsm_vendor: HSMVendor
+        self, project_name: str, hsm_vendor: HSMVendor
     ) -> models.Project:
         # Create project in DB
         # ToDo: Note: Project name must not contain (-) hyphens
@@ -244,8 +239,8 @@ class WhenTestingPluginResourceWithSoftHSM(unittest.TestCase):
         config_sections = self.conf.list_all_sections()
         for section in config_sections:
             if (
-                    section.startswith(SECRET_STORE_PREFIX)
-                    and len(section.split(":")) == EXPECTED_SECTION_PARTS
+                section.startswith(SECRET_STORE_PREFIX)
+                and len(section.split(":")) == EXPECTED_SECTION_PARTS
             ):
                 secret_store_config_count += 1
 
@@ -310,10 +305,12 @@ class WhenTestingPluginResourceWithSoftHSM(unittest.TestCase):
         kek_data = encrypted_data.kek_meta_project
         self.assertEqual(kek_data.algorithm, ALGORITHM)
         self.assertEqual(kek_data.bit_length, BIT_LENGTH)
-        self.assertTrue(kek_data.kek_label.startswith(f"project-{PROJECT_NAME}-key-"))
+        self.assertTrue(
+            kek_data.kek_label.startswith(f"project-{PROJECT_NAME}-key-")
+        )
         self.assertEqual(kek_data.mode, MODE)
         self.assertIsNotNone(kek_data.plugin_meta)
-        self.assertEqual(kek_data.plugin_name,HSMCryptoPlugin.UTIMACO.value)
+        self.assertEqual(kek_data.plugin_name, HSMCryptoPlugin.UTIMACO.value)
         self.assertEqual(kek_data.status, States.ACTIVE)
 
         plugin_meta = json.loads(kek_data.plugin_meta)
@@ -326,6 +323,86 @@ class WhenTestingPluginResourceWithSoftHSM(unittest.TestCase):
 
         # Check secret store metadata values
         secret_store_metadata = new_secret.secret_store_metadata
-        self.assertEqual(secret_store_metadata["plugin_name"].value,
-                         "barbican.plugin.store_crypto.StoreCryptoAdapterPlugin")
-        self.assertEqual(secret_store_metadata["content_type"].value, CONTENT_TYPE)
+        self.assertEqual(
+            secret_store_metadata["plugin_name"].value,
+            "barbican.plugin.store_crypto.StoreCryptoAdapterPlugin",
+        )
+        self.assertEqual(
+            secret_store_metadata["content_type"].value, CONTENT_TYPE
+        )
+
+    def test_get_secret_returns_secret(self):
+        ALGORITHM = "AES"
+        BIT_LENGTH = 256
+        MODE = "CBC"
+        SECRET_TYPE = "passphrase"
+        CONTENT_TYPE = "application/octet-stream"
+        CONTENT_ENCODING = "base64"
+        PROJECT_NAME = "testproject2"
+
+        project = self._create_project_secret_store_mapping(
+            project_name=PROJECT_NAME, hsm_vendor=HSMVendor.UTIMACO
+        )
+
+        # Create a new secret
+        raw_secret = b"ABCDEFABCDEFABCDEFABCDEF"
+        spec = {
+            "algorithm": ALGORITHM,
+            "bit_length": BIT_LENGTH,
+            "mode": MODE,
+            "secret_type": SECRET_TYPE,
+        }
+        new_secret, _ = store_secret(
+            unencrypted_raw=base64.b64encode(raw_secret),
+            content_type_raw=CONTENT_TYPE,
+            content_encoding=CONTENT_ENCODING,
+            secret_model=models.Secret(spec),
+            project_model=project,
+        )
+
+        # Get the newly created secret
+        retrieved_raw_secret = get_secret(
+            requesting_content_type=CONTENT_TYPE,
+            secret_model=new_secret,
+            project_model=project,
+        )
+        self.assertEqual(raw_secret, retrieved_raw_secret)
+
+    def test_delete_secret_deletes_secret(self):
+        ALGORITHM = "AES"
+        BIT_LENGTH = 256
+        MODE = "CBC"
+        SECRET_TYPE = "passphrase"
+        CONTENT_TYPE = "application/octet-stream"
+        CONTENT_ENCODING = "base64"
+        PROJECT_NAME = "testproject3"
+
+        project = self._create_project_secret_store_mapping(
+            project_name=PROJECT_NAME, hsm_vendor=HSMVendor.UTIMACO
+        )
+
+        # Create a new secret
+        raw_secret = b"ABCDEFABCDEFABCDEFABCDEF"
+        spec = {
+            "algorithm": ALGORITHM,
+            "bit_length": BIT_LENGTH,
+            "mode": MODE,
+            "secret_type": SECRET_TYPE,
+        }
+        new_secret, _ = store_secret(
+            unencrypted_raw=base64.b64encode(raw_secret),
+            content_type_raw=CONTENT_TYPE,
+            content_encoding=CONTENT_ENCODING,
+            secret_model=models.Secret(spec),
+            project_model=project,
+        )
+
+        # Delete the newly created secret
+        delete_secret(secret_model=new_secret, project_id=project.external_id)
+
+        # Verify that the secret is not present
+        self.assertRaises(
+            exception.NotFound,
+            self.secret_repo.get_secret_by_id,
+            new_secret.id,
+        )
