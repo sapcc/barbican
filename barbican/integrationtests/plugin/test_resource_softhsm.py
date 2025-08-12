@@ -13,19 +13,29 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from argparse import Namespace
 import base64
+from enum import StrEnum
 import json
 import subprocess
 import unittest
-from argparse import Namespace
-from enum import StrEnum
+
+import pytest
 
 from barbican.cmd.hsm_partition_create import create_hsm_partition
-from barbican.common import config, exception, resources
-from barbican.model import models, repositories
-from barbican.model.models import States
-from barbican.plugin.crypto import hsm_partition_crypto, p11_crypto, pkcs11
-from barbican.plugin.resources import delete_secret, get_secret, store_secret
+from barbican.common import config
+from barbican.common import exception
+from barbican.common import resources
+from barbican.common.utils import is_multiple_backends_enabled
+from barbican.model import models
+from barbican.model import repositories
+from barbican.plugin.crypto import hsm_partition_crypto
+from barbican.plugin.crypto import p11_crypto
+from barbican.plugin.crypto import pkcs11
+from barbican.plugin.interface.secret_store import StorePluginNotAvailableOrMisconfigured  # noqa: E501
+from barbican.plugin.resources import delete_secret
+from barbican.plugin.resources import get_secret
+from barbican.plugin.resources import store_secret
 
 
 class HSMVendor(StrEnum):
@@ -39,8 +49,8 @@ class CryptoPlugin(StrEnum):
 
 
 class HSMCryptoPlugin(StrEnum):
-    THALES = "barbican.plugin.crypto.hsm_partition_crypto.ThalesHSMPartitionCryptoPlugin"
-    UTIMACO = "barbican.plugin.crypto.hsm_partition_crypto.UtimacoHSMPartitionCryptoPlugin"
+    THALES = "barbican.plugin.crypto.hsm_partition_crypto.ThalesHSMPartitionCryptoPlugin"  # noqa: E501
+    UTIMACO = "barbican.plugin.crypto.hsm_partition_crypto.UtimacoHSMPartitionCryptoPlugin"  # noqa: E501
 
 
 hsm_vendor_to_plugin_mapping = {
@@ -48,10 +58,15 @@ hsm_vendor_to_plugin_mapping = {
     HSMVendor.UTIMACO: CryptoPlugin.UTIMACO,
 }
 
+hsm_vendor_to_hsm_plugin_mapping = {
+    HSMVendor.THALES: HSMCryptoPlugin.THALES,
+    HSMVendor.UTIMACO: HSMCryptoPlugin.UTIMACO,
+}
 
-class WhenTestingPluginResourceWithSoftHSM(unittest.TestCase):
+
+class TestPluginResourceWithSoftHSM:
     @classmethod
-    def setUpClass(cls):
+    def setup_class(cls):
         if not cls.is_softhsm_available():
             raise unittest.SkipTest("SoftHSM not found!")
 
@@ -73,7 +88,7 @@ class WhenTestingPluginResourceWithSoftHSM(unittest.TestCase):
             login_passphrase=cls.conf.p11_crypto_plugin.login,
             rw_session=cls.conf.p11_crypto_plugin.rw_session,
             slot_id=int(cls.conf.p11_crypto_plugin.slot_id),
-            encryption_mechanism=cls.conf.p11_crypto_plugin.encryption_mechanism,
+            encryption_mechanism=cls.conf.p11_crypto_plugin.encryption_mechanism,  # noqa: E501
             hmac_mechanism=cls.conf.p11_crypto_plugin.hmac_mechanism,
             key_wrap_mechanism=cls.conf.p11_crypto_plugin.key_wrap_mechanism,
             token_serial_number=cls.conf.p11_crypto_plugin.token_serial_number,
@@ -83,7 +98,7 @@ class WhenTestingPluginResourceWithSoftHSM(unittest.TestCase):
         cls.gen_hmac()
 
         # Setup DB and tables with secret stores
-        # ToDo: Note: Initialization of secret stores are based on `p11_crypto_plugin` configs
+        # ToDo: Note: Init of secret stores is based on `p11_crypto_plugin` configs  # noqa: E501
         repositories.setup_database_engine_and_factory(
             initialize_secret_stores=True
         )
@@ -97,7 +112,7 @@ class WhenTestingPluginResourceWithSoftHSM(unittest.TestCase):
         cls.secret_repo = repositories.get_secret_repository()
 
     @classmethod
-    def tearDownClass(cls):
+    def teardown_class(cls):
         # Delete mkek and hmac keys using `p11_crypto_plugin` configs
         cls.delete_key(cls.conf.p11_crypto_plugin.mkek_label)
         cls.delete_key(cls.conf.p11_crypto_plugin.hmac_label)
@@ -230,6 +245,15 @@ class WhenTestingPluginResourceWithSoftHSM(unittest.TestCase):
         return project
 
     def test_secret_store_count_matches_config(self):
+        """Secret stores count from the DB matches with the conf if multiple
+
+        secret stores option is enabled
+        """
+        if not is_multiple_backends_enabled():
+            raise unittest.SkipTest(
+                "Multiple secret stores option is not enabled!"
+            )
+
         secret_stores = self.secret_stores_repo.get_all()
 
         SECRET_STORE_PREFIX = "secretstore"
@@ -244,14 +268,20 @@ class WhenTestingPluginResourceWithSoftHSM(unittest.TestCase):
             ):
                 secret_store_config_count += 1
 
-        self.assertEqual(
-            len(secret_stores),
-            secret_store_config_count,
-            f"Expected {secret_store_config_count} secret stores from config, "
-            f"but found {len(secret_stores)} in database",
+        assert len(secret_stores) == secret_store_config_count, (
+            f"Expected {secret_store_config_count} secret stores from "
+            f"config, but found {len(secret_stores)} in database"
         )
 
-    def test_store_secret_creates_secret(self):
+    @pytest.mark.parametrize(
+        "project_name, hsm_vendor",
+        [
+            ("testproject_utimaco", HSMVendor.UTIMACO),
+            ("testproject_thales", HSMVendor.THALES),
+        ],
+    )
+    def test_store_secret_creates_secret(self, project_name, hsm_vendor):
+        """Creates a new secret"""
         ALGORITHM = "AES"
         BIT_LENGTH = 256
         MODE = "CBC"
@@ -262,10 +292,10 @@ class WhenTestingPluginResourceWithSoftHSM(unittest.TestCase):
         CONTENT_ENCODING = "base64"
         MKEK_LABEL = "mkek"
         HMAC_LABEL = "hmac"
-        PROJECT_NAME = "testproject"
+        PROJECT_NAME = project_name
 
         project = self._create_project_secret_store_mapping(
-            project_name=PROJECT_NAME, hsm_vendor=HSMVendor.UTIMACO
+            project_name=PROJECT_NAME, hsm_vendor=hsm_vendor
         )
 
         # Create a new secret
@@ -284,61 +314,64 @@ class WhenTestingPluginResourceWithSoftHSM(unittest.TestCase):
         )
 
         # Check secret values
-        self.assertEqual(new_secret.algorithm, ALGORITHM)
-        self.assertEqual(new_secret.bit_length, BIT_LENGTH)
-        self.assertEqual(new_secret.mode, MODE)
-        self.assertEqual(new_secret.secret_type, SECRET_TYPE)
-        self.assertEqual(new_secret.status, States.ACTIVE)
+        assert new_secret.algorithm == ALGORITHM
+        assert new_secret.bit_length == BIT_LENGTH
+        assert new_secret.mode == MODE
+        assert new_secret.secret_type == SECRET_TYPE
+        assert new_secret.status == models.States.ACTIVE
 
         # Check encrypted data values
         encrypted_data = new_secret.encrypted_data[0]
-        self.assertEqual(encrypted_data.content_type, CONTENT_TYPE)
-        self.assertIsNotNone(encrypted_data.cypher_text)
-        self.assertIsNotNone(encrypted_data.kek_meta_extended)
-        self.assertEqual(encrypted_data.status, States.ACTIVE)
+        assert encrypted_data.content_type == CONTENT_TYPE
+        assert encrypted_data.cypher_text is not None
+        assert encrypted_data.kek_meta_extended is not None
+        assert encrypted_data.status == models.States.ACTIVE
 
         kek_meta_extended = json.loads(encrypted_data.kek_meta_extended)
-        self.assertIsNotNone(kek_meta_extended["iv"])
-        self.assertEqual(kek_meta_extended["mechanism"], MECHANISM)
+        assert kek_meta_extended["iv"] is not None
+        assert kek_meta_extended["mechanism"] == MECHANISM
 
         # Check kek data values
         kek_data = encrypted_data.kek_meta_project
-        self.assertEqual(kek_data.algorithm, ALGORITHM)
-        self.assertEqual(kek_data.bit_length, BIT_LENGTH)
-        self.assertTrue(
+        assert kek_data.algorithm == ALGORITHM
+        assert kek_data.bit_length == BIT_LENGTH
+        assert (
             kek_data.kek_label.startswith(f"project-{PROJECT_NAME}-key-")
+            is True
         )
-        self.assertEqual(kek_data.mode, MODE)
-        self.assertIsNotNone(kek_data.plugin_meta)
-        self.assertEqual(kek_data.plugin_name, HSMCryptoPlugin.UTIMACO.value)
-        self.assertEqual(kek_data.status, States.ACTIVE)
+        assert kek_data.mode == MODE
+        assert kek_data.plugin_meta is not None
+        assert (
+            kek_data.plugin_name
+            == hsm_vendor_to_hsm_plugin_mapping[hsm_vendor]
+        )
+        assert kek_data.status == models.States.ACTIVE
 
         plugin_meta = json.loads(kek_data.plugin_meta)
-        self.assertIsNotNone(plugin_meta["iv"])
-        self.assertIsNotNone(plugin_meta["wrapped_key"])
-        self.assertIsNotNone(plugin_meta["hmac"])
-        self.assertEqual(plugin_meta["mkek_label"], MKEK_LABEL)
-        self.assertEqual(plugin_meta["hmac_label"], HMAC_LABEL)
-        self.assertEqual(plugin_meta["key_wrap_mechanism"], KEY_WRAP_MECHANISM)
+        assert plugin_meta["iv"] is not None
+        assert plugin_meta["wrapped_key"] is not None
+        assert plugin_meta["hmac"] is not None
+        assert plugin_meta["mkek_label"] == MKEK_LABEL
+        assert plugin_meta["hmac_label"] == HMAC_LABEL
+        assert plugin_meta["key_wrap_mechanism"] == KEY_WRAP_MECHANISM
 
         # Check secret store metadata values
         secret_store_metadata = new_secret.secret_store_metadata
-        self.assertEqual(
-            secret_store_metadata["plugin_name"].value,
-            "barbican.plugin.store_crypto.StoreCryptoAdapterPlugin",
+        assert (
+            secret_store_metadata["plugin_name"].value
+            == "barbican.plugin.store_crypto.StoreCryptoAdapterPlugin"
         )
-        self.assertEqual(
-            secret_store_metadata["content_type"].value, CONTENT_TYPE
-        )
+        assert secret_store_metadata["content_type"].value == CONTENT_TYPE
 
     def test_get_secret_returns_secret(self):
+        """Retrieves the raw secret if present"""
         ALGORITHM = "AES"
         BIT_LENGTH = 256
         MODE = "CBC"
         SECRET_TYPE = "passphrase"
         CONTENT_TYPE = "application/octet-stream"
         CONTENT_ENCODING = "base64"
-        PROJECT_NAME = "testproject2"
+        PROJECT_NAME = "testproject"
 
         project = self._create_project_secret_store_mapping(
             project_name=PROJECT_NAME, hsm_vendor=HSMVendor.UTIMACO
@@ -360,15 +393,43 @@ class WhenTestingPluginResourceWithSoftHSM(unittest.TestCase):
             project_model=project,
         )
 
-        # Get the newly created secret
+        # Retrieve the newly created secret
         retrieved_raw_secret = get_secret(
             requesting_content_type=CONTENT_TYPE,
             secret_model=new_secret,
             project_model=project,
         )
-        self.assertEqual(raw_secret, retrieved_raw_secret)
+        assert raw_secret == retrieved_raw_secret
+
+    def test_get_secret_raises_exception(self):
+        """Raises exception if the secret is not present"""
+        ALGORITHM = "AES"
+        BIT_LENGTH = 256
+        MODE = "CBC"
+        SECRET_TYPE = "passphrase"
+        CONTENT_TYPE = "application/octet-stream"
+        PROJECT_NAME = "testproject2"
+
+        project = self._create_project_secret_store_mapping(
+            project_name=PROJECT_NAME, hsm_vendor=HSMVendor.UTIMACO
+        )
+
+        # Retrieve a secret which is not present
+        spec = {
+            "algorithm": ALGORITHM,
+            "bit_length": BIT_LENGTH,
+            "mode": MODE,
+            "secret_type": SECRET_TYPE,
+        }
+        with pytest.raises(StorePluginNotAvailableOrMisconfigured):
+            get_secret(
+                requesting_content_type=CONTENT_TYPE,
+                secret_model=models.Secret(spec),
+                project_model=project,
+            )
 
     def test_delete_secret_deletes_secret(self):
+        """Deletes secret if present"""
         ALGORITHM = "AES"
         BIT_LENGTH = 256
         MODE = "CBC"
@@ -401,8 +462,30 @@ class WhenTestingPluginResourceWithSoftHSM(unittest.TestCase):
         delete_secret(secret_model=new_secret, project_id=project.external_id)
 
         # Verify that the secret is not present
-        self.assertRaises(
-            exception.NotFound,
-            self.secret_repo.get_secret_by_id,
-            new_secret.id,
+        with pytest.raises(exception.NotFound):
+            self.secret_repo.get_secret_by_id(new_secret.id)
+
+    def test_delete_secret_raises_exception(self):
+        """Raises exception if the secret is not present"""
+        ALGORITHM = "AES"
+        BIT_LENGTH = 256
+        MODE = "CBC"
+        SECRET_TYPE = "passphrase"
+        PROJECT_NAME = "testproject4"
+
+        project = self._create_project_secret_store_mapping(
+            project_name=PROJECT_NAME, hsm_vendor=HSMVendor.UTIMACO
         )
+
+        # Delete a secret which is not present
+        spec = {
+            "algorithm": ALGORITHM,
+            "bit_length": BIT_LENGTH,
+            "mode": MODE,
+            "secret_type": SECRET_TYPE,
+        }
+        with pytest.raises(exception.NotFound):
+            delete_secret(
+                secret_model=models.Secret(spec),
+                project_id=project.external_id,
+            )
