@@ -17,6 +17,7 @@ from argparse import Namespace
 import base64
 from enum import StrEnum
 import json
+from pathlib import Path
 import subprocess
 import unittest
 
@@ -70,8 +71,13 @@ class TestPluginResourceWithSoftHSM:
         if not cls.is_softhsm_available():
             raise unittest.SkipTest("SoftHSM not found!")
 
-        # Load global configs
+        # Load test configs
+        test_config_file = (
+            Path(__file__).parent.parent.resolve() / "barbican.conf.test"
+        )
+        config.parse_args(config.CONF, default_config_files=[test_config_file])
         cls.conf = config.CONF
+
         cls.conf.set_override(
             "connection", "sqlite:///:memory:", group="database"
         )
@@ -489,3 +495,12 @@ class TestPluginResourceWithSoftHSM:
                 secret_model=models.Secret(spec),
                 project_id=project.external_id,
             )
+
+
+# ToDo:
+# - Add library path in options <<
+# - Update configs <<
+# - Create configs for test <<
+# - Update the partition conf table
+# - Create repository class and refactor the CLI
+# -

@@ -155,8 +155,6 @@ encryption_mechanism = CKM_AES_CBC
 
 [hsm_partition_crypto_plugin:utimaco_hsm]
 library_path = /usr/local/lib/softhsm/libsofthsm2.so
-slot_id = <slot_id>
-login = <crypto_user_pin>
 hmac_key_length = 32
 mkek_label = mkek
 hmac_label = hmac
@@ -167,8 +165,6 @@ encryption_mechanism = CKM_AES_CBC
 
 [hsm_partition_crypto_plugin:thales_hsm]
 library_path = /usr/local/lib/softhsm/libsofthsm2.so
-slot_id = <slot_id>
-login = <crypto_user_pin>
 hmac_key_length = 32
 mkek_label = mkek
 hmac_label = hmac
