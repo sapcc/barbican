@@ -495,12 +495,3 @@ class TestPluginResourceWithSoftHSM:
                 secret_model=models.Secret(spec),
                 project_id=project.external_id,
             )
-
-
-# ToDo:
-# - Add library path in options <<
-# - Update configs <<
-# - Create configs for test <<
-# - Update the partition conf table
-# - Create repository class and refactor the CLI
-# -

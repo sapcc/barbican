@@ -32,6 +32,10 @@ hsm_partition_crypto_plugin_group = cfg.OptGroup(
 )
 hsm_partition_crypto_plugin_opts = [
     cfg.StrOpt(
+        "library_path",
+        help=u._("Path to vendor library"),
+    ),
+    cfg.StrOpt(
         "plugin_name",
         help=u._("User friendly plugin name"),
         default="HSM Partition Crypto Plugin",
@@ -229,7 +233,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
             self.conf = conf[self.section_name]
 
         # Initialize basic attributes from config
-        self.library_path = None
+        self.library_path = self.conf.library_path
         self.login = None
         self.rw_session = self.conf.rw_session
         self.slot_id = None
@@ -317,7 +321,6 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         self.current_partition = partition
 
         # Set required attributes for parent class
-        self.library_path = partition.credentials["library_path"]
         self.login = partition.credentials["password"]
         self.slot_id = int(partition.slot_id)
         self.token_labels = (
