@@ -85,6 +85,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         self.conf.hsm_partition_crypto_plugin.default_partition_id = (
             self.partition_id
         )
+        self.conf.hsm_partition_crypto_plugin.library_path = self.library_path
 
     def test_init_with_global_conf(self):
         store_plugin_name = "default"

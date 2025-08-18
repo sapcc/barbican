@@ -1,0 +1,73 @@
+[DEFAULT]
+debug = True
+verbose = True
+wsgi_debug = True
+
+[database]
+connection = mysql+pymysql://rakib:12345@localhost:3306/barbican
+
+[paste_deploy]
+flavor = noauth
+
+[keystone_authtoken]
+enable = False
+
+[auth]
+enable_authentication = False
+
+[secretstore]
+enable_multiple_secret_stores = True
+stores_lookup_suffix = software, pkcs11, utimaco_hsm, thales_hsm
+
+[secretstore:software]
+name = Software Only Crypto
+secret_store_plugin = store_crypto
+crypto_plugin = simple_crypto
+
+[secretstore:pkcs11]
+name = PKCS11 HSM
+secret_store_plugin = store_crypto
+crypto_plugin = p11_crypto
+global_default = True
+
+[secretstore:utimaco_hsm]
+name = Utimaco HSM
+secret_store_plugin = store_crypto
+crypto_plugin = utimaco_hsm_crypto
+
+[secretstore:thales_hsm]
+name = Thales HSM
+secret_store_plugin = store_crypto
+crypto_plugin = thales_hsm_crypto
+
+[p11_crypto_plugin]
+library_path = /usr/local/lib/softhsm/libsofthsm2.so
+slot_id = 1338313258
+login = 12345
+hmac_key_length = 32
+mkek_label = mkek
+hmac_label = hmac
+hmac_key_type = CKK_GENERIC_SECRET
+hmac_keygen_mechanism = CKM_GENERIC_SECRET_KEY_GEN
+hmac_mechanism = CKM_SHA256_HMAC
+encryption_mechanism = CKM_AES_CBC
+
+[hsm_partition_crypto_plugin:utimaco_hsm]
+library_path = /usr/local/lib/softhsm/libsofthsm2.so
+hmac_key_length = 32
+mkek_label = mkek
+hmac_label = hmac
+hmac_key_type = CKK_GENERIC_SECRET
+hmac_keygen_mechanism = CKM_GENERIC_SECRET_KEY_GEN
+hmac_mechanism = CKM_SHA256_HMAC
+encryption_mechanism = CKM_AES_CBC
+
+[hsm_partition_crypto_plugin:thales_hsm]
+library_path = /usr/local/lib/softhsm/libsofthsm2.so
+hmac_key_length = 32
+mkek_label = mkek
+hmac_label = hmac
+hmac_key_type = CKK_GENERIC_SECRET
+hmac_keygen_mechanism = CKM_GENERIC_SECRET_KEY_GEN
+hmac_mechanism = CKM_SHA256_HMAC
+encryption_mechanism = CKM_AES_CBC

@@ -32,6 +32,10 @@ hsm_partition_crypto_plugin_group = cfg.OptGroup(
 )
 hsm_partition_crypto_plugin_opts = [
     cfg.StrOpt(
+        "library_path",
+        help=u._("Path to vendor library"),
+    ),
+    cfg.StrOpt(
         "plugin_name",
         help=u._("User friendly plugin name"),
         default="HSM Partition Crypto Plugin",
@@ -135,7 +139,7 @@ hsm_partition_crypto_plugin_opts = [
 
 
 # Register Vendor-specific sections
-def register_hsm_vendor_sections():
+def register_opts_for_hsm_vendors(conf):
     # Define vendor HSMs that you want to support
     vendors = ["thales_hsm", "utimaco_hsm"]
 
@@ -150,8 +154,8 @@ def register_hsm_vendor_sections():
         )
 
         # Register the group and options
-        CONF.register_group(vendor_group)
-        CONF.register_opts(
+        conf.register_group(vendor_group)
+        conf.register_opts(
             hsm_partition_crypto_plugin_opts, group=vendor_group
         )
 
@@ -161,7 +165,7 @@ def register_hsm_vendor_sections():
 
 
 # Register all vendor sections
-register_hsm_vendor_sections()
+register_opts_for_hsm_vendors(CONF)
 
 CONF.register_group(hsm_partition_crypto_plugin_group)
 CONF.register_opts(
@@ -229,7 +233,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
             self.conf = conf[self.section_name]
 
         # Initialize basic attributes from config
-        self.library_path = None
+        self.library_path = self.conf.library_path
         self.login = None
         self.rw_session = self.conf.rw_session
         self.slot_id = None
@@ -317,7 +321,6 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         self.current_partition = partition
 
         # Set required attributes for parent class
-        self.library_path = partition.credentials["library_path"]
         self.login = partition.credentials["password"]
         self.slot_id = int(partition.slot_id)
         self.token_labels = (
@@ -378,7 +381,6 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
 
 
 class UtimacoHSMPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
-
     """Utimaco HSM Partition Crypto Plugin.
 
     This is a specialized version of HSMPartitionCryptoPlugin configured
@@ -393,7 +395,6 @@ class UtimacoHSMPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
 
 
 class ThalesHSMPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
-
     """Thales HSM Partition Crypto Plugin.
 
     This is a specialized version of HSMPartitionCryptoPlugin configured
