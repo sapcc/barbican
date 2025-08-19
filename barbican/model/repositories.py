@@ -2590,6 +2590,40 @@ class HSMPartitionConfigRepo(BaseRepo):
         """Sub-class hook: build a retrieve query."""
         return session.query(models.HSMPartitionConfig).filter_by(id=entity_id)
 
+    def create_from(self, entity, session=None):
+        """Sub-class hook: create from entity."""
+        if not entity:
+            msg = u._("Must supply non-None {entity_name}.").format(
+                entity_name=self._do_entity_name()
+            )
+            raise exception.Invalid(msg)
+
+        LOG.debug("Begin create from...")
+        session = self.get_session(session)
+        start = time.time()  # DEBUG
+
+        # Validate the attributes before we go any further. From my
+        # (unknown Glance developer) investigation, the @validates
+        # decorator does not validate
+        # on new records, only on existing records, which is, well,
+        # idiotic.
+        self._do_validate(entity.to_dict())
+
+        try:
+            LOG.debug("Saving entity...")
+            entity.save(session=session)
+        except db_exc.DBDuplicateEntry as e:
+            session.rollback()
+            LOG.exception("Problem saving entity for create")
+            error_msg = re.sub("[()]", "", str(e.args))
+            raise exception.ConstraintCheck(error=error_msg)
+
+        LOG.debug(
+            "Elapsed repo " "create secret:%s", (time.time() - start)
+        )  # DEBUG
+
+        return entity
+
     def get_by_project_id(
         self, project_id, suppress_exception=False, session=None
     ):
