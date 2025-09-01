@@ -24,10 +24,10 @@ import sys
 
 from oslo_config import cfg
 from oslo_log import log as logging
-# from oslo_config import cfg as oslo_cfg
+from sqlalchemy import create_engine
+from sqlalchemy import text
 
-from sqlalchemy import create_engine, text
-
+from barbican.cmd.hsm_partition_create import create_hsm_partition
 from barbican.cmd import pkcs11_kek_rewrap as pkcs11_rewrap
 from barbican.common import config
 from barbican.model import clean
@@ -98,7 +98,7 @@ class DbCommands(object):
         action="store_true",
         dest="do_clean_unassociated_projects",
         default=False,
-        help="Remove projects that have no " "associated resources.",
+        help="Remove projects that have no associated resources.",
     )
     @args(
         "--soft-delete-expired-secrets",
@@ -617,7 +617,6 @@ class HSMCommands(object):
 
 
 class SAPCommands(object):
-
     description = (
         "Move all secrets associated with "
         "the old_project_id to the new_project_id."
@@ -686,6 +685,76 @@ class SAPCommands(object):
                     )
             except Exception as e:
                 print(f"An error occurred: {e}")
+
+    @args(
+        "--external-project-id",
+        "-p",
+        dest="external_project_id",
+        metavar="<external-project-id>",
+        help="External project ID",
+    )
+    @args(
+        "--partition-label",
+        "-l",
+        dest="partition_label",
+        metavar="<partition-label>",
+        help="Label for the HSM partition",
+    )
+    @args(
+        "--token-label",
+        "-t",
+        dest="token_label",
+        metavar="<token-label>",
+        help="Token label",
+    )
+    @args(
+        "--slot-id",
+        "-s",
+        dest="slot_id",
+        type=int,
+        metavar="<slot-id>",
+        help="Slot ID for the HSM",
+    )
+    @args(
+        "--password",
+        dest="password",
+        metavar="<password>",
+        help="Password/PIN for the HSM",
+    )
+    @args(
+        "--partition-id",
+        dest="partition_id",
+        metavar="<partition-id>",
+        help="Override partition UUID",
+    )
+    @args(
+        "--debug",
+        dest="debug",
+        action="store_true",
+        default=False,
+        help="Enable debug output",
+    )
+    def create_hsm_partition_config(
+        self,
+        conf,
+        external_project_id=None,
+        partition_label=None,
+        token_label=None,
+        slot_id=None,
+        password=None,
+        partition_id=None,
+        debug=False,
+    ):
+        parsed_args = argparse.Namespace(
+            external_project_id=external_project_id,
+            token_label=token_label,
+            slot_id=slot_id,
+            password=password,
+            partition_id=partition_id,
+            partition_label=partition_label,
+            debug=debug,
+        )
+        create_hsm_partition(parsed_args)
 
 
 CATEGORIES = {

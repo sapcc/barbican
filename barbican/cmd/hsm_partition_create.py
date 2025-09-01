@@ -18,8 +18,6 @@ Command-line utility for creating HSM partition configurations
 and mapping them to projects in the Barbican database.
 """
 
-import argparse
-import sys
 import uuid
 
 from oslo_utils import timeutils
@@ -34,67 +32,7 @@ CONF = repositories.CONF
 LOG = utils.getLogger(__name__)
 
 
-# Set up command-line arguments
-def main():
-    parser = argparse.ArgumentParser(
-        description="Create HSM partition configurations in Barbican."
-    )
-
-    parser.add_argument(
-        "--external-project-id",
-        "-p",
-        help="External project ID",
-    )
-    parser.add_argument(
-        "--partition-label",
-        "-l",
-        help="Label for the HSM partition",
-        default="",
-    )
-    parser.add_argument(
-        "--token-label", "-t", help="Token label", default="testing"
-    )
-    parser.add_argument(
-        "--slot-id",
-        "-s",
-        help="Slot ID for the HSM",
-        type=int,
-    )
-    parser.add_argument(
-        "--password",
-        help="Password/PIN for the HSM",
-    )
-    parser.add_argument(
-        "--partition-id",
-        help="Override partition UUID",
-        default=None,
-    )
-    parser.add_argument(
-        "--mapping-id",
-        help="Override mapping UUID",
-        default=None,
-    )
-    parser.add_argument(
-        "--debug", help="Enable debug output", action="store_true"
-    )
-
-    args = parser.parse_args()
-
-    if args.debug:
-        LOG.logger.setLevel("DEBUG")
-
-    try:
-        setup_database()
-        create_hsm_partition(args)
-        LOG.info("HSM partition configuration created successfully")
-    except Exception as e:
-        LOG.exception("Error creating HSM partition configuration: %s", e)
-        return 1
-
-    return 0
-
-
-def setup_database():
+def _setup_database():
     """Initialize database connection."""
     LOG.debug("Initializing database connection")
     repositories.setup_database_engine_and_factory()
@@ -102,6 +40,11 @@ def setup_database():
 
 
 def create_hsm_partition(args):
+    if hasattr(args, "debug") and args.debug:
+        LOG.logger.setLevel("DEBUG")
+
+    _setup_database()
+
     """Create HSM partition configuration and map to project."""
 
     # Step 1: Fetch or create project based on external_id
@@ -130,7 +73,7 @@ def create_hsm_partition(args):
     hsm_partition_config_obj.created_at = timeutils.utcnow()
     hsm_partition_config_obj.updated_at = timeutils.utcnow()
     hsm_partition_config_obj.project_id = project.id
-    hsm_partition_config_obj.partition_label = args.partition_label
+    hsm_partition_config_obj.partition_label = args.partition_label or ""
     hsm_partition_config_obj.token_label = args.token_label
     hsm_partition_config_obj.slot_id = args.slot_id
     hsm_partition_config_obj.credentials = {"password": args.password}
@@ -162,7 +105,3 @@ def create_hsm_partition(args):
             args.partition_label,
         )
         return hsm_partition_config
-
-
-if __name__ == "__main__":
-    sys.exit(main())

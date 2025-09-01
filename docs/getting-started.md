@@ -243,12 +243,11 @@ pkcs11-tool --module /usr/local/lib/softhsm/libsofthsm2.so -O \
 Create HSM partition config for the project in the DB:
 
 ```
-python ./barbican/cmd/hsm_partition_create.py \
+ barbican-manage sap create_hsm_partition_config \
   --external-project-id <project_name> \
   --token-label <label> \
   --slot-id <slot_id> \
-  --password <crypto_user_pin> \
-  --library-path /usr/local/lib/softhsm/libsofthsm2.so
+  --password <crypto_user_pin>
 ```
 
 ## Run Unit Tests
