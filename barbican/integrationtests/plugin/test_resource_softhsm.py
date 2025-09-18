@@ -219,7 +219,6 @@ class TestPluginResourceWithSoftHSM:
         project = resources.get_or_create_project(project_name)
 
         # Create HSM partition config in DB
-        # ToDo: Refactor in a proper way with repository
         # ToDo: Note: Some of the options are not present in HSM crypto plugin
         args = Namespace(
             external_project_id=project.external_id,
