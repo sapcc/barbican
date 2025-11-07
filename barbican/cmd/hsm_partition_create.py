@@ -14,8 +14,9 @@
 #    under the License.
 
 """
-Command-line utility for creating HSM partition configurations
-and mapping them to projects in the Barbican database.
+Command-line utility for creating HSM partition configurations.
+
+This tool also maps partitions to projects in the Barbican database.
 """
 
 import uuid
@@ -40,7 +41,11 @@ def _setup_database():
 
 
 def create_hsm_partition(args):
-    """Create HSM partition configuration and map to project."""
+    """Create HSM partition configuration and map to project.
+
+    Also ensures the project's preferred secret store mapping when
+    ``--secret-store-id`` is provided.
+    """
     if hasattr(args, "debug") and args.debug:
         LOG.logger.setLevel("DEBUG")
 
@@ -140,8 +145,10 @@ def _ensure_preferred_secret_store(
     project_id: str,
     secret_store_id: str,
 ) -> None:
-    """Create or update project_secret_store to mark the preferred store
-    (ORM path).
+    """Create or update the project's preferred secret store (ORM path).
+
+    Uses the repository layer to upsert a ``ProjectSecretStore`` record
+    and mark it as the active/preferred mapping for the given project.
     """
     LOG.info(
         "Ensuring preferred secret store for project %s -> %s",
@@ -159,7 +166,7 @@ def _ensure_preferred_secret_store(
             session.query(models.ProjectSecretStore)
             .filter(
                 models.ProjectSecretStore.project_id == project_id,
-                models.ProjectSecretStore.deleted == False,
+                models.ProjectSecretStore.deleted.is_(False),
             )
             .one_or_none()
         )
