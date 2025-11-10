@@ -240,14 +240,15 @@ pkcs11-tool --module /usr/local/lib/softhsm/libsofthsm2.so -O \
 
 ## Create HSM Partition Config
 
-Create HSM partition config for the project in the DB:
+Create Secret store and HSM partition config mapping for the project in the DB:
 
 ```
- barbican-manage sap create_hsm_partition_config \
-  --external-project-id <project_name> \
-  --token-label <label> \
-  --slot-id <slot_id> \
-  --password <crypto_user_pin>
+barbican-manage sap create_hsm_partition_config  \
+ --external-project-id <openstack_project_name>  \
+ --partition-label <partition_label>  \
+ --token-label <pkcs11 token label>   \
+ --slot-id <slot_id> \
+ --secret-store-id <secret_store_id>
 ```
 
 ## Run Unit Tests

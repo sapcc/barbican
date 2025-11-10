@@ -705,27 +705,27 @@ class SAPCommands(object):
         "-t",
         dest="token_label",
         metavar="<token-label>",
-        help="Token label",
+        help="pkcs11 Token label",
     )
     @args(
         "--slot-id",
         "-s",
         dest="slot_id",
-        type=int,
         metavar="<slot-id>",
         help="Slot ID for the HSM",
-    )
-    @args(
-        "--password",
-        dest="password",
-        metavar="<password>",
-        help="Password/PIN for the HSM",
     )
     @args(
         "--partition-id",
         dest="partition_id",
         metavar="<partition-id>",
         help="Override partition UUID",
+    )
+    @args(
+        "--secret-store-id",
+        "-c",
+        dest="secret_store_id",
+        metavar="<secret-store-id>",
+        help="ID of the preferred secret store to associate with the project",
     )
     @args(
         "--debug",
@@ -741,7 +741,7 @@ class SAPCommands(object):
         partition_label=None,
         token_label=None,
         slot_id=None,
-        password=None,
+        secret_store_id=None,
         partition_id=None,
         debug=False,
     ):
@@ -749,7 +749,7 @@ class SAPCommands(object):
             external_project_id=external_project_id,
             token_label=token_label,
             slot_id=slot_id,
-            password=password,
+            secret_store_id=secret_store_id,
             partition_id=partition_id,
             partition_label=partition_label,
             debug=debug,
