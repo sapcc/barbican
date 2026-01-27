@@ -25,6 +25,7 @@ from sqlalchemy.ext import compiler
 from sqlalchemy.ext import declarative
 from sqlalchemy import orm
 from sqlalchemy.orm import collections as col
+from sqlalchemy.sql.schema import UniqueConstraint
 from sqlalchemy import types as sql_types
 
 from barbican.common import exception
@@ -1732,3 +1733,54 @@ class SecretConsumerMetadatum(BASE, SoftDeleteMixIn, ModelBase):
             "resource_type": self.resource_type,
             "resource_id": self.resource_id,
         }
+
+
+class HSMPartitionConfig(BASE, ModelBase):
+    """Stores HSM partition configurations."""
+
+    __tablename__ = "hsm_partition_configs"
+
+    # Link to project
+    project_id = sa.Column(
+        sa.String(36),
+        sa.ForeignKey("projects.id"),
+        nullable=False,
+        index=True,
+    )
+
+    # HSM partition details
+    slot_id = sa.Column(
+        sa.String(255),
+        nullable=False,
+    )
+    token_label = sa.Column(
+        sa.String(255),
+        nullable=False,
+    )
+    partition_label = sa.Column(
+        sa.String(255),
+        nullable=False,
+    )
+
+    # Encrypted credentials stored as JSON
+    credentials = sa.Column(
+        JsonBlob(),
+        nullable=False,
+    )
+
+    # Partition metadata
+    partition_metadata = sa.Column(
+        JsonBlob(),
+        nullable=True,
+    )
+
+    # Relationship to Project
+    project = orm.relationship("Project")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "slot_id",
+            name="_hsm_partition_config_project_slot_uc",
+        ),
+    )
