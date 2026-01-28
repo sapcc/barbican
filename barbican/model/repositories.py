@@ -58,6 +58,7 @@ _CONTAINER_CONSUMER_REPOSITORY = None
 _CONTAINER_REPOSITORY = None
 _CONTAINER_SECRET_REPOSITORY = None
 _ENCRYPTED_DATUM_REPOSITORY = None
+_HSM_PARTITION_CONFIG_REPOSITORY = None
 _KEK_DATUM_REPOSITORY = None
 _ORDER_PLUGIN_META_REPOSITORY = None
 _ORDER_BARBICAN_META_REPOSITORY = None
@@ -2421,6 +2422,103 @@ class ProjectSecretStoreRepo(BaseRepo):
             project_id=project_id)
 
 
+class HSMPartitionConfigRepo(BaseRepo):
+    """Repository for HSM partition configurations."""
+
+    def _do_entity_name(self):
+        """Sub-class hook: return entity name, such as for debugging."""
+        return "HSMPartitionConfig"
+
+    def _do_build_get_query(self, entity_id, external_project_id, session):
+        """Sub-class hook: build a retrieve query."""
+        return session.query(models.HSMPartitionConfig).filter_by(id=entity_id)
+
+    def create_from(self, entity, session=None):
+        """Sub-class hook: create from entity."""
+        if not entity:
+            msg = u._("Must supply non-None {entity_name}.").format(
+                entity_name=self._do_entity_name()
+            )
+            raise exception.Invalid(msg)
+
+        LOG.debug("Begin create from...")
+        session = self.get_session(session)
+        start = time.time()  # DEBUG
+
+        # Validate the attributes before we go any further. From my
+        # (unknown Glance developer) investigation, the @validates
+        # decorator does not validate
+        # on new records, only on existing records, which is, well,
+        # idiotic.
+        self._do_validate(entity.to_dict())
+
+        try:
+            LOG.debug("Saving entity...")
+            entity.save(session=session)
+        except db_exc.DBDuplicateEntry as e:
+            session.rollback()
+            LOG.exception("Problem saving entity for create")
+            error_msg = re.sub("[()]", "", str(e.args))
+            raise exception.ConstraintCheck(error=error_msg)
+
+        LOG.debug(
+            "Elapsed repo " "create secret:%s", (time.time() - start)
+        )  # DEBUG
+
+        return entity
+
+    def get_by_project_id(
+            self, project_id, suppress_exception=False, session=None
+    ):
+        """Returns HSM partition config for a project.
+        :param project_id: ID of project
+        :param suppress_exception: when True, NotFound is not raised
+        :param session: SQLAlchemy session object
+        :raises NotFound: if no partition is found for the project
+        :returns: HSMPartitionConfig entity if found
+        """
+        session = self.get_session(session)
+
+        # First try to find by internal project ID
+        query = session.query(models.HSMPartitionConfig)
+        query = query.filter_by(project_id=project_id)
+
+        try:
+            entity = query.one()
+        except sa_orm.exc.NoResultFound:
+            # If not found, project_id might be an external ID
+            try:
+                # Try to find the internal project ID first
+                project_query = session.query(models.Project)
+                project_query = project_query.filter_by(external_id=project_id)
+                project = project_query.one()
+
+                # Then try to find the HSM partition
+                # config with the internal project ID
+                query = session.query(models.HSMPartitionConfig)
+                query = query.filter_by(project_id=project.id)
+                entity = query.one()
+            except sa_orm.exc.NoResultFound:
+                LOG.info(
+                    "No HSM partition config found for project = %s",
+                    project_id,
+                )
+                entity = None
+                if not suppress_exception:
+                    _raise_entity_not_found(self._do_entity_name(), project_id)
+
+        return entity
+
+    def _build_get_project_entities_query(self, project_id, session):
+        """Builds query for getting HSM partition config for a project.
+        :param project_id: id of barbican project entity
+        :param session: existing db session reference
+        """
+        return session.query(models.HSMPartitionConfig).filter_by(
+            project_id=project_id
+        )
+
+
 class SecretConsumerRepo(BaseRepo):
     """Repository for the SecretConsumer entity."""
 
@@ -2616,6 +2714,14 @@ def get_encrypted_datum_repository():
     return _get_repository(_ENCRYPTED_DATUM_REPOSITORY, EncryptedDatumRepo)
 
 
+def get_hsm_partition_config_repository():
+    """Returns a singleton HSMPartitionConfig repository instance."""
+    global _HSM_PARTITION_CONFIG_REPOSITORY
+    return _get_repository(
+        _HSM_PARTITION_CONFIG_REPOSITORY, HSMPartitionConfigRepo
+    )
+
+
 def get_kek_datum_repository():
     """Returns a singleton KEK Datum repository instance."""
     global _KEK_DATUM_REPOSITORY
@@ -2673,6 +2779,13 @@ def get_project_quotas_repository():
     global _PROJECT_QUOTAS_REPOSITORY
     return _get_repository(_PROJECT_QUOTAS_REPOSITORY,
                            ProjectQuotasRepo)
+
+
+# def get_project_hsm_partition_repository():
+#     """Returns a singleton ProjectHSMPartition repository instance."""
+#     global _PROJECT_HSM_PARTITION_REPOSITORY
+#     return _get_repository(_PROJECT_HSM_PARTITION_REPOSITORY,
+#     ProjectHSMPartitionRepo)
 
 
 def get_secret_acl_repository():
