@@ -32,12 +32,10 @@ LOG = utils.getLogger(__name__)
 simple_crypto_plugin_group = cfg.OptGroup(name='simple_crypto_plugin',
                                           title="Simple Crypto Plugin Options")
 simple_crypto_plugin_opts = [
-    cfg.MultiStrOpt(
-        'kek',
-        secret=True,
-        help=u._('Fernet Key-Encryption Key (KEK) to be used by SimpleCrypto '
-                 'Plugin to encrypt Project-specific KEKs.'),
-    ),
+    cfg.StrOpt('kek',
+               default='dGhpcnR5X3R3b19ieXRlX2tleWJsYWhibGFoYmxhaGg=',
+               help=u._('Key encryption key to be used by Simple Crypto '
+                        'Plugin'), secret=True),
     cfg.StrOpt('plugin_name',
                help=u._('User friendly plugin name'),
                default='Software Only Crypto'),
@@ -55,9 +53,7 @@ class SimpleCryptoPlugin(c.CryptoPluginBase):
     """Insecure implementation of the crypto plugin."""
 
     def __init__(self, conf=CONF):
-        if len(conf.simple_crypto_plugin.kek) < 1:
-            raise ValueError(u._("SimpleCrypto KEK is undefined"))
-        self.master_keys = conf.simple_crypto_plugin.kek
+        self.master_kek = conf.simple_crypto_plugin.kek
         self.plugin_name = conf.simple_crypto_plugin.plugin_name
         LOG.info("{} initialized".format(self.plugin_name))
 
@@ -68,9 +64,7 @@ class SimpleCryptoPlugin(c.CryptoPluginBase):
         if not kek_meta_dto.plugin_meta:
             raise ValueError(u._('KEK not yet created.'))
         # the kek is stored encrypted. Need to decrypt.
-        encryptor = fernet.MultiFernet(
-            [fernet.Fernet(x) for x in self.master_keys]
-        )
+        encryptor = fernet.Fernet(self.master_kek)
         # Note : If plugin_meta type is unicode, encode to byte.
         if isinstance(kek_meta_dto.plugin_meta, str):
             kek_meta_dto.plugin_meta = kek_meta_dto.plugin_meta.encode('utf-8')
@@ -93,24 +87,12 @@ class SimpleCryptoPlugin(c.CryptoPluginBase):
         cyphertext = encryptor.encrypt(unencrypted)
         return c.ResponseDTO(cyphertext, None)
 
-    def decrypt(self, decrypt_dto, kek_meta_dto, kek_meta_extended,
+    def decrypt(self, encrypted_dto, kek_meta_dto, kek_meta_extended,
                 project_id):
         kek = self._get_kek(kek_meta_dto)
-        encrypted = decrypt_dto.encrypted
+        encrypted = encrypted_dto.encrypted
         decryptor = fernet.Fernet(kek)
         return decryptor.decrypt(encrypted)
-
-    def rewrap(self, decrypt_dto, kek_meta_dto, kek_meta_extended,
-               rewrap_kek_meta, project_id):
-        kek = self._get_kek(kek_meta_dto)
-        rewrap_kek = self._get_kek(rewrap_kek_meta)
-
-        encryptor = fernet.MultiFernet(
-            [fernet.Fernet(rewrap_kek), fernet.Fernet(kek)]
-        )
-        rewrapped = encryptor.rotate(decrypt_dto.encrypted)
-
-        return c.ResponseDTO(rewrapped, None)
 
     def bind_kek_metadata(self, kek_meta_dto):
         kek_meta_dto.algorithm = 'aes'
@@ -118,7 +100,7 @@ class SimpleCryptoPlugin(c.CryptoPluginBase):
         kek_meta_dto.mode = 'cbc'
         if not kek_meta_dto.plugin_meta:
             # the kek is stored encrypted in the plugin_meta field
-            encryptor = fernet.Fernet(self.master_keys[0])
+            encryptor = fernet.Fernet(self.master_kek)
             key = fernet.Fernet.generate_key()
             kek_meta_dto.plugin_meta = encryptor.encrypt(key)
         return kek_meta_dto
@@ -250,7 +232,7 @@ class SimpleCryptoPlugin(c.CryptoPluginBase):
             length_factor = 2
 
         if (algorithm.lower() in c.PluginSupportTypes.SYMMETRIC_ALGORITHMS
-            and bit_length / length_factor
+                and bit_length / length_factor
                 in c.PluginSupportTypes.SYMMETRIC_KEY_LENGTHS):
             return True
         elif (algorithm.lower() in c.PluginSupportTypes.ASYMMETRIC_ALGORITHMS
