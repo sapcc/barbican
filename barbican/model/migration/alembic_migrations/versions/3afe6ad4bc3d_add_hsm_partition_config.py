@@ -70,4 +70,3 @@ def upgrade():
         ["project_id"],
         unique=False,
     )
-    # ### end Alembic commands ###
