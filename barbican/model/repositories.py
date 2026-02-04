@@ -58,6 +58,7 @@ _CONTAINER_CONSUMER_REPOSITORY = None
 _CONTAINER_REPOSITORY = None
 _CONTAINER_SECRET_REPOSITORY = None
 _ENCRYPTED_DATUM_REPOSITORY = None
+_HSM_PARTITION_CONFIG_REPOSITORY = None
 _KEK_DATUM_REPOSITORY = None
 _ORDER_PLUGIN_META_REPOSITORY = None
 _ORDER_BARBICAN_META_REPOSITORY = None
@@ -98,12 +99,12 @@ def hard_reset():
 def setup_database_engine_and_factory(initialize_secret_stores=False):
     global sa_logger, _SESSION_FACTORY, _ENGINE
 
-    LOG.info('Setting up database engine and session factory')
+    LOG.info("Setting up database engine and session factory")
     if CONF.debug:
-        sa_logger = logging.getLogger('sqlalchemy.engine')
+        sa_logger = logging.getLogger("sqlalchemy.engine")
         sa_logger.setLevel(logging.DEBUG)
     if CONF.sql_pool_logging:
-        pool_logger = logging.getLogger('sqlalchemy.pool')
+        pool_logger = logging.getLogger("sqlalchemy.pool")
         pool_logger.setLevel(logging.DEBUG)
 
     _ENGINE = _get_engine(_ENGINE)
@@ -174,7 +175,8 @@ def _get_engine(engine):
         except Exception as err:
             msg = u._(
                 "Error configuring registry database with supplied "
-                "database connection. Got error: {error}").format(error=err)
+                "database connection. Got error: {error}"
+            ).format(error=err)
             LOG.exception(msg)
             raise exception.BarbicanException(msg)
         finally:
@@ -188,7 +190,7 @@ def _get_engine(engine):
 
             _auto_generate_tables(engine, tables)
         else:
-            LOG.info('Not auto-creating barbican registry DB')
+            LOG.info("Not auto-creating barbican registry DB")
 
     return engine
 
@@ -263,6 +265,11 @@ def clean_paging_values(offset_arg=0, limit_arg=CONF.default_limit_paging):
             limit = CONF.max_limit_paging
     except ValueError:
         limit = CONF.default_limit_paging
+
+    LOG.debug(
+        "Clean paging values limit=%(limit)s, offset=%(offset)s"
+        % {"limit": limit, "offset": offset}
+    )
 
     LOG.debug("Clean paging values limit=%(limit)s, offset=%(offset)s" %
               {'limit': limit,
@@ -2421,6 +2428,105 @@ class ProjectSecretStoreRepo(BaseRepo):
             project_id=project_id)
 
 
+class HSMPartitionConfigRepo(BaseRepo):
+    """Repository for HSM partition configurations."""
+
+    def _do_entity_name(self):
+        """Sub-class hook: return entity name, such as for debugging."""
+        return "HSMPartitionConfig"
+
+    def _do_build_get_query(self, entity_id, external_project_id, session):
+        """Sub-class hook: build a retrieve query."""
+        return session.query(models.HSMPartitionConfig).filter_by(id=entity_id)
+
+    def create_from(self, entity, session=None):
+        """Sub-class hook: create from entity."""
+        if not entity:
+            msg = u._("Must supply non-None {entity_name}.").format(
+                entity_name=self._do_entity_name()
+            )
+            raise exception.Invalid(msg)
+
+        LOG.debug("Begin create from...")
+        session = self.get_session(session)
+        start = time.time()  # DEBUG
+
+        # Validate the attributes before we go any further. From my
+        # (unknown Glance developer) investigation, the @validates
+        # decorator does not validate
+        # on new records, only on existing records, which is, well,
+        # idiotic.
+        self._do_validate(entity.to_dict())
+
+        try:
+            LOG.debug("Saving entity...")
+            entity.save(session=session)
+        except db_exc.DBDuplicateEntry as e:
+            session.rollback()
+            LOG.exception("Problem saving entity for create")
+            error_msg = re.sub("[()]", "", str(e.args))
+            raise exception.ConstraintCheck(error=error_msg)
+
+        LOG.debug(
+            "Elapsed repo " "create secret:%s", (time.time() - start)
+        )  # DEBUG
+
+        return entity
+
+    def get_by_project_id(
+        self, project_id, suppress_exception=False, session=None
+    ):
+        """Returns HSM partition config for a project.
+
+        :param project_id: ID of project
+        :param suppress_exception: when True, NotFound is not raised
+        :param session: SQLAlchemy session object
+        :raises NotFound: if no partition is found for the project
+        :returns: HSMPartitionConfig entity if found
+        """
+        session = self.get_session(session)
+
+        # First try to find by internal project ID
+        query = session.query(models.HSMPartitionConfig)
+        query = query.filter_by(project_id=project_id)
+
+        try:
+            entity = query.one()
+        except sa_orm.exc.NoResultFound:
+            # If not found, project_id might be an external ID
+            try:
+                # Try to find the internal project ID first
+                project_query = session.query(models.Project)
+                project_query = project_query.filter_by(external_id=project_id)
+                project = project_query.one()
+
+                # Then try to find the HSM partition
+                # config with the internal project ID
+                query = session.query(models.HSMPartitionConfig)
+                query = query.filter_by(project_id=project.id)
+                entity = query.one()
+            except sa_orm.exc.NoResultFound:
+                LOG.info(
+                    "No HSM partition config found for project = %s",
+                    project_id,
+                )
+                entity = None
+                if not suppress_exception:
+                    _raise_entity_not_found(self._do_entity_name(), project_id)
+
+        return entity
+
+    def _build_get_project_entities_query(self, project_id, session):
+        """Builds query for getting HSM partition config for a project.
+
+        :param project_id: id of barbican project entity
+        :param session: existing db session reference
+        """
+        return session.query(models.HSMPartitionConfig).filter_by(
+            project_id=project_id
+        )
+
+
 class SecretConsumerRepo(BaseRepo):
     """Repository for the SecretConsumer entity."""
 
@@ -2614,6 +2720,14 @@ def get_encrypted_datum_repository():
     """Returns a singleton Encrypted Datum repository instance."""
     global _ENCRYPTED_DATUM_REPOSITORY
     return _get_repository(_ENCRYPTED_DATUM_REPOSITORY, EncryptedDatumRepo)
+
+
+def get_hsm_partition_config_repository():
+    """Returns a singleton HSMPartitionConfig repository instance."""
+    global _HSM_PARTITION_CONFIG_REPOSITORY
+    return _get_repository(
+        _HSM_PARTITION_CONFIG_REPOSITORY, HSMPartitionConfigRepo
+    )
 
 
 def get_kek_datum_repository():
