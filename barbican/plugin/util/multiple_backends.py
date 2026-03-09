@@ -156,8 +156,28 @@ def sync_secret_stores(secretstore_manager, crypto_manager=None):
 
         if crypto_plugin:
             friendly_name = crypto_friendly_names.get(crypto_plugin)
+            if not friendly_name:
+                LOG.error(
+                    "Crypto plugin '%s' is configured in secretstore but "
+                    "failed to initialize. Check plugin configuration.",
+                    crypto_plugin
+                )
+                raise exception.MultipleStorePluginValueMissing(
+                    "Crypto plugin '{}' is configured but failed to "
+                    "initialize. Ensure the plugin's configuration section "
+                    "is properly set up.".format(crypto_plugin)
+                )
         else:
             friendly_name = ss_friendly_names.get(parsed_store.store_plugin)
+            if not friendly_name:
+                LOG.error(
+                    "Store plugin '%s' is configured but failed to initialize.",
+                    parsed_store.store_plugin
+                )
+                raise exception.MultipleStorePluginValueMissing(
+                    "Store plugin '{}' is configured but failed to "
+                    "initialize.".format(parsed_store.store_plugin)
+                )
 
         conf_stores.append(db_models.SecretStores(
             name=friendly_name, store_plugin=parsed_store.store_plugin,
