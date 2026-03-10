@@ -171,7 +171,8 @@ def sync_secret_stores(secretstore_manager, crypto_manager=None):
             friendly_name = ss_friendly_names.get(parsed_store.store_plugin)
             if not friendly_name:
                 LOG.error(
-                    "Store plugin '%s' is configured but failed to initialize.",
+                    "Store plugin '%s' is configured but failed to "
+                    "initialize.",
                     parsed_store.store_plugin
                 )
                 raise exception.MultipleStorePluginValueMissing(
