@@ -55,9 +55,16 @@ class SimpleCryptoPlugin(c.CryptoPluginBase):
     """Insecure implementation of the crypto plugin."""
 
     def __init__(self, conf=CONF):
-        if len(conf.simple_crypto_plugin.kek) < 1:
-            raise ValueError(u._("SimpleCrypto KEK is undefined"))
-        self.master_keys = conf.simple_crypto_plugin.kek
+        kek = conf.simple_crypto_plugin.kek
+        if not kek or len(kek) < 1:
+            raise ValueError(u._(
+                "SimpleCrypto KEK is undefined. "
+                "Please configure [simple_crypto_plugin] kek option. "
+                "You can generate a Fernet key using: "
+                "python3 -c 'from cryptography.fernet import Fernet; "
+                "print(Fernet.generate_key().decode())'"
+            ))
+        self.master_keys = kek
         self.plugin_name = conf.simple_crypto_plugin.plugin_name
         LOG.info("{} initialized".format(self.plugin_name))
 
