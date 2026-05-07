@@ -118,8 +118,6 @@ function configure_dogtag_plugin {
 
 # configure_barbican - Set config files, create data dirs, etc
 function configure_barbican {
-    setup_develop $BARBICAN_DIR
-
     [ ! -d $BARBICAN_CONF_DIR ] && sudo mkdir -m 755 -p $BARBICAN_CONF_DIR
     sudo chown $USER $BARBICAN_CONF_DIR
 
@@ -169,14 +167,17 @@ function configure_barbican {
         echo_summary "Barbican requires that the RabbitMQ service is enabled"
     fi
 
-    write_uwsgi_config "$BARBICAN_UWSGI_CONF" "$BARBICAN_WSGI" "/key-manager"
+    # SimpleCryptoPlugin settings
+    iniset $BARBICAN_CONF simple_crypto_plugin kek 'dGhpcnR5X3R3b19ieXRlX2tleWJsYWhibGFoYmxhaGg='
+
+    write_uwsgi_config "$BARBICAN_UWSGI_CONF" "$BARBICAN_WSGI" "/key-manager" "" "barbican-api"
     ## Set up keystone
 
     # Turn on the middleware
     iniset $BARBICAN_PASTE_CONF 'pipeline:barbican_api' pipeline 'barbican-api-keystone'
 
     # Set the keystone parameters
-    configure_keystone_authtoken_middleware $BARBICAN_CONF barbican
+    configure_keystone_authtoken_middleware $BARBICAN_CONF barbican keystone_authtoken key-manager
 
     # Enable the keystone listener
     iniset $BARBICAN_CONF keystone_notifications enable True
@@ -196,13 +197,7 @@ function init_barbican {
 
 # install_barbican - Collect source and prepare
 function install_barbican {
-    # Install package requirements
-    if is_fedora; then
-        install_package sqlite-devel openldap-devel
-    fi
-    # TODO(ravips): We need this until barbican gets into devstack
     setup_develop $BARBICAN_DIR
-    pip_install 'uwsgi'
 }
 
 # install_barbicanclient - Collect source and prepare
@@ -216,7 +211,7 @@ function install_barbicanclient {
 # start_barbican - Start running processes, including screen
 function start_barbican {
     # Start the Barbican service up.
-    run_process barbican-svc "$BARBICAN_BIN_DIR/uwsgi --ini $BARBICAN_UWSGI_CONF"
+    run_process barbican-svc "$(which uwsgi) --ini $BARBICAN_UWSGI_CONF"
 
     # Pause while the barbican-svc populates the database, otherwise the retry
     # service below might try to do this at the same time, leading to race
@@ -232,11 +227,6 @@ function start_barbican {
 
 # stop_barbican - Stop running processes
 function stop_barbican {
-    # This will eventually be refactored to work like
-    # Solum and Manila (script to kick off a wsgiref server)
-    # For now, this will stop uWSGI rather than have it hang
-    killall -9 uwsgi
-
     # This cleans up the PID file, but uses pkill so Barbican
     # uWSGI emperor process doesn't actually stop
     stop_process barbican-svc

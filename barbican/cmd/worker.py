@@ -16,31 +16,9 @@
 # limitations under the License.
 
 """
-Barbican worker server.
+Server startup application for barbican-worker
 """
-
-import eventlet
-import os
 import sys
-
-# Oslo messaging RPC server uses eventlet.
-eventlet.monkey_patch()
-# Monkey patch the original current_thread to use the up-to-date _active
-# global variable. See https://bugs.launchpad.net/bugs/1863021 and
-# https://github.com/eventlet/eventlet/issues/592
-import __original_module_threading as orig_threading
-import threading  # noqa
-orig_threading.current_thread.__globals__['_active'] = threading._active
-
-# 'Borrowed' from the Glance project:
-# If ../barbican/__init__.py exists, add ../ to Python search path, so that
-# it will override what happens to be installed in /usr/(local/)lib/python...
-possible_topdir = os.path.normpath(os.path.join(os.path.abspath(sys.argv[0]),
-                                   os.pardir,
-                                   os.pardir))
-if os.path.exists(os.path.join(possible_topdir, 'barbican', '__init__.py')):
-    sys.path.insert(0, possible_topdir)
-
 
 from barbican.common import config
 from barbican import queue
@@ -48,16 +26,16 @@ from barbican.queue import server
 from barbican import version
 
 from oslo_log import log
+from oslo_service.backend import BackendType
+from oslo_service.backend import init_backend
 from oslo_service import service
-
-
-def fail(returncode, e):
-    sys.stderr.write("ERROR: {0}\n".format(e))
-    sys.exit(returncode)
 
 
 def main():
     try:
+        # Ensure oslo.service uses the threading backend early
+        init_backend(BackendType.THREADING)
+
         CONF = config.CONF
         CONF(sys.argv[1:], project='barbican',
              version=version.version_info.version_string)
@@ -77,7 +55,8 @@ def main():
             restart_method='mutate'
         ).wait()
     except RuntimeError as e:
-        fail(1, e)
+        sys.stderr.write("ERROR: {0}\n".format(e))
+        sys.exit(1)
 
 
 if __name__ == '__main__':

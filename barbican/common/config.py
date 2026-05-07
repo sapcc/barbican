@@ -24,7 +24,8 @@ from oslo_config import cfg
 from oslo_db import options as db_options
 from oslo_log import log
 from oslo_middleware import cors
-from oslo_policy import opts as policy_opts
+from oslo_service.backend import BackendType
+from oslo_service.backend import register_backend_default_hook
 
 from barbican import i18n as u
 import barbican.version
@@ -74,6 +75,8 @@ db_opts = [
                help=u._("Default page size for the 'limit' paging URL "
                         "parameter.")),
     cfg.StrOpt('sql_pool_class', default="QueuePool",
+               deprecated_for_removal=True,
+               deprecated_reason='This option has been ineffective',
                help=u._("Accepts a class imported from the sqlalchemy.pool "
                         "module, and handles the details of building the "
                         "pool for you. If commented out, SQLAlchemy will "
@@ -287,13 +290,6 @@ def set_lib_defaults():
 
     set_middleware_defaults()
 
-    # TODO(gmann): Remove setting the default value of the RBAC
-    # config options once barbican is ready for new RBAC.
-    policy_opts.set_defaults(
-        CONF,
-        enforce_scope=False,
-        enforce_new_defaults=False)
-
 
 def set_middleware_defaults():
     """Update default configuration options for oslo.middleware."""
@@ -329,6 +325,10 @@ def set_middleware_defaults():
 CONF = new_config()
 LOG = logging.getLogger(__name__)
 parse_args(CONF)
+
+# Register default backend hook to prefer threading if not initialized
+# elsewhere
+register_backend_default_hook(lambda: BackendType.THREADING)
 
 # Adding global scope dict for all different configs created in various
 # modules. In barbican, each plugin module creates its own *new* config

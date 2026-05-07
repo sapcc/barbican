@@ -14,7 +14,6 @@
 
 - job:
     name: barbican-dogtag-tox-functional
-    nodeset: devstack-single-node-fedora-latest
     parent: barbican-tox-functional
     description: |
       Functional testing for DogTag backend
@@ -118,7 +117,6 @@
         - barbican-grenade:
             voting: false
         - barbican-tempest-plugin-simple-crypto
-        - barbican-tempest-plugin-simple-crypto-jammy
         - barbican-tempest-plugin-simple-crypto-secure-rbac
         - barbican-tempest-plugin-simple-crypto-ipv6-only
         - barbican-tox-functional-fips:

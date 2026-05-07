@@ -26,6 +26,7 @@ from oslo_config import cfg
 from oslo_log import log as logging
 
 from barbican.cmd import pkcs11_kek_rewrap as pkcs11_rewrap
+from barbican.cmd import simple_crypto
 from barbican.common import config
 from barbican.model import clean
 from barbican.model.migration import commands
@@ -348,9 +349,43 @@ class HSMCommands(object):
             sys.exit(1)
 
 
+class SimpleCryptoCommands:
+    """Class for mananging SimpleCryptoPlugin backend"""
+
+    description = "Subcommands for managing SimpleCryptoPlugin backend"
+
+    rewrap_pkek_description = "Re-wrap project KEKs"
+
+    @args('--dry-run', action='store_true', dest='dryrun', default=False,
+          help="Displays changes that will be made (non-destructive)")
+    def rewrap_pkek(self, conf, dryrun=True):
+        rewrapper = simple_crypto.SimpleCryptoKEKRewrap(
+            simple_crypto.CONF
+        )
+        rewrapper.execute(dryrun)
+
+    new_pkek_description = ("Create a new Project-specific Key-Encryption-Key "
+                            "(pKEK) for the given project-id.")
+
+    @args('--project', dest='project_id', metavar='<project_id>',
+          help="External Project ID e.g. Keystone Project ID.")
+    def new_pkek(self, conf, project_id):
+        pkek_cmd = simple_crypto.SimpleCryptoCmd(simple_crypto.CONF)
+        pkek_cmd.new_pkek(project_id)
+
+    rewrap_secrets_description = "Re-wrap secrets for the given Project-Id"
+
+    @args('--project', dest='project_id', metavar='<project_id>',
+          help="External Project ID e.g. Keystone Project ID.")
+    def rewrap_secrets(self, conf, project_id):
+        simple_crypto_cmd = simple_crypto.SimpleCryptoCmd(simple_crypto.CONF)
+        simple_crypto_cmd.rewrap_secrets(project_id)
+
+
 CATEGORIES = {
     'db': DbCommands,
     'hsm': HSMCommands,
+    'simple_crypto': SimpleCryptoCommands,
 }
 
 
@@ -450,7 +485,8 @@ def main():
     try:
         return fn(CONF, *fn_args, **fn_kwargs)
     except Exception as e:
-        sys.exit("ERROR: %s" % e)
+        sys.stderr.write("ERROR: {0}\n".format(e))
+        sys.exit(1)
 
 
 if __name__ == '__main__':
