@@ -28,6 +28,55 @@ CONF = config.CONF
 log.setup(CONF, 'barbican')
 LOG = log.getLogger(__name__)
 
+# Default batch size for cleanup operations. Sized so a single batch fits
+# comfortably in the InnoDB buffer pool and undo log on a 10 GB pool.
+DEFAULT_CLEANUP_BATCH_SIZE = 10000
+
+# Emit a progress log line every Nth batch so operators can monitor long
+# cleanup runs without attaching a debugger or querying the database.
+_PROGRESS_LOG_EVERY_N_BATCHES = 10
+
+
+def _batched_delete_by_id(model, id_query, batch_size, op_label):
+    """Delete rows in `model` whose ids are returned by `id_query`, batched.
+
+    Generic helper that powers all batched cleanup paths. Selects up to
+    ``batch_size`` ids per iteration, hard-deletes them, commits, and loops
+    until no more matching ids are found.
+
+    The caller's ``id_query`` MUST be constructed such that already-deleted
+    rows are excluded from subsequent iterations. For pure soft-delete-to-
+    hard-delete loops this is trivially true (the row is gone after DELETE).
+    For more complex queries the caller is responsible for the predicate.
+
+    :param model: ORM model class whose rows are to be deleted.
+    :param id_query: a SQLAlchemy Query yielding primary keys (1-tuples).
+    :param batch_size: max rows per batch.
+    :param op_label: short string used in log messages (e.g. model name).
+    :returns: total rows deleted across all committed batches.
+    """
+    total = 0
+    batch_no = 0
+    while True:
+        session = repo.get_session()
+        ids = [row[0] for row in id_query.limit(batch_size).all()]
+        if not ids:
+            break
+        count = session.query(model).filter(
+            model.id.in_(ids)).delete(synchronize_session=False)
+        # Detach all ORM objects before commit. With expire_on_commit=True
+        # (the default for the scoped session in this project), a commit
+        # would otherwise clear attached objects' __dict__, breaking
+        # callers and tests that hold references to fixture objects.
+        session.expunge_all()
+        repo.commit()
+        total += count
+        batch_no += 1
+        if batch_no % _PROGRESS_LOG_EVERY_N_BATCHES == 0:
+            LOG.debug("[%s] progress: %d batches committed, %d rows so far",
+                      op_label, batch_no, total)
+    return total
+
 
 def cleanup_unassociated_projects():
     """Clean up unassociated projects.
@@ -68,57 +117,99 @@ def cleanup_unassociated_projects():
 
 
 def cleanup_parent_with_no_child(parent_model, child_model,
-                                 threshold_date=None):
-    """Clean up soft deletions in parent that do not have references in child.
+                                 threshold_date=None,
+                                 batch_size=DEFAULT_CLEANUP_BATCH_SIZE):
+    """Clean up soft-deleted parents that have no live child rows, in batches.
 
-    Before running this function, the child table should be cleaned of
-    soft deletions. This function left outer joins the parent and child
-    tables and finds the parent entries that do not have a foreign key
-    reference in the child table. Then the results are filtered by soft
-    deletions and are cleaned up.
+    Before running this function the child table should already be cleaned
+    of soft-deleted rows. This function left-outer-joins the parent and
+    child tables and finds parent entries that have no foreign-key match
+    in the child table, then filters by soft-deletion / threshold_date and
+    hard-deletes them.
 
-    :param parent_model: table class for parent
-    :param child_model: table class for child which restricts parent deletion
-    :param threshold_date: soft deletions older than this date will be removed
-    :returns: total number of entries removed from database
+    Operates in batches of ``batch_size`` rows. Each batch is committed
+    independently so InnoDB can release pages and undo log between batches.
+    Partial progress is durable: if an exception is raised mid-run, batches
+    committed before the failure are NOT rolled back.
+
+    :param parent_model: table class for parent.
+    :param child_model: table class for child which restricts parent deletion.
+    :param threshold_date: soft deletions older than this date will be
+                           removed.
+    :param batch_size: max rows hard-deleted per committed batch.
+    :returns: total entries removed from the database.
     """
     LOG.debug("Cleaning soft deletes for %(parent_name)s without "
-              "a child in %(child_name)s" %
+              "a child in %(child_name)s",
               {'parent_name': parent_model.__name__,
                'child_name': child_model.__name__})
-    session = repo.get_session()
-    sub_query = session.query(parent_model.id)
-    sub_query = sub_query.outerjoin(child_model)
-    sub_query = sub_query.filter(child_model.id == None)  # noqa
-    sub_query = sub_query.subquery()
-    sub_query = sa_sql.select(sub_query)
-    query = session.query(parent_model)
-    query = query.filter(parent_model.id.in_(sub_query))
-    query = query.filter(parent_model.deleted)
-    if threshold_date:
-        query = query.filter(parent_model.deleted_at <= threshold_date)
-    delete_count = query.delete(synchronize_session=False)
+
+    def _id_query():
+        session = repo.get_session()
+        sub_query = session.query(parent_model.id)
+        sub_query = sub_query.outerjoin(child_model)
+        sub_query = sub_query.filter(child_model.id == None)  # noqa
+        sub_query = sub_query.filter(parent_model.deleted)
+        if threshold_date:
+            sub_query = sub_query.filter(
+                parent_model.deleted_at <= threshold_date)
+        return sub_query
+
+    # Each iteration of the batched loop re-issues the id query against a
+    # fresh session state. Because each batch hard-deletes the matched
+    # rows, the candidate set strictly shrinks across iterations and the
+    # loop terminates.
+    total = 0
+    batch_no = 0
+    label = "%s/no-%s" % (parent_model.__name__, child_model.__name__)
+    while True:
+        session = repo.get_session()
+        ids = [row[0] for row in _id_query().limit(batch_size).all()]
+        if not ids:
+            break
+        count = session.query(parent_model).filter(
+            parent_model.id.in_(ids)).delete(synchronize_session=False)
+        session.expunge_all()
+        repo.commit()
+        total += count
+        batch_no += 1
+        if batch_no % _PROGRESS_LOG_EVERY_N_BATCHES == 0:
+            LOG.debug("[%s] progress: %d batches committed, %d rows so far",
+                      label, batch_no, total)
+
     LOG.info("Cleaned up %(delete_count)s entries for %(parent_name)s "
              "with no children in %(child_name)s",
-             {'delete_count': delete_count,
+             {'delete_count': total,
               'parent_name': parent_model.__name__,
               'child_name': child_model.__name__})
-    return delete_count
+    return total
 
 
-def cleanup_softdeletes(model, threshold_date=None, batch_size=10000):
-    """Remove soft deletions from a table in batches.
+def cleanup_softdeletes(model, threshold_date=None,
+                        batch_size=DEFAULT_CLEANUP_BATCH_SIZE):
+    """Remove soft-deleted rows from a table, in batches.
 
-    Processes rows in batches and commits after each batch to avoid
-    exhausting the InnoDB buffer pool and undo log on large tables.
+    Selects up to ``batch_size`` soft-deleted ids per iteration, hard-
+    deletes them, then commits. Each commit releases InnoDB pages and undo
+    log so very large tables (millions of rows) can be cleaned without
+    exhausting the buffer pool.
 
-    :param model: table class to remove soft deletions
-    :param threshold_date: soft deletions older than this date will be removed
-    :param batch_size: number of rows to delete per batch
-    :returns: total number of entries removed from the database
+    Partial progress is durable: if an exception is raised mid-run, the
+    batches committed before the failure are NOT rolled back. This is a
+    deliberate trade-off vs. the previous one-shot semantics; without
+    incremental commits the operation is impossible to complete on tables
+    that no longer fit in the buffer pool.
+
+    :param model: table class whose soft deletions should be removed.
+    :param threshold_date: only rows soft-deleted on or before this date
+                           are removed.
+    :param batch_size: max rows hard-deleted per committed batch.
+    :returns: total rows removed from the database.
     """
     LOG.debug("Cleaning soft deletes: %s", model.__name__)
     total = 0
+    batch_no = 0
+    label = model.__name__
     while True:
         session = repo.get_session()
         id_query = session.query(model.id).filter_by(deleted=True)
@@ -129,12 +220,17 @@ def cleanup_softdeletes(model, threshold_date=None, batch_size=10000):
             break
         count = session.query(model).filter(
             model.id.in_(ids)).delete(synchronize_session=False)
-        # Detach all ORM objects before committing so that expire_on_commit
-        # does not clear their __dict__. Test code and callers holding object
-        # references can still read pk attributes from the detached state.
+        # Detach all ORM objects before commit so that expire_on_commit
+        # does not clear their __dict__. Test code and callers holding
+        # object references can still read pk attributes from the
+        # detached state.
         session.expunge_all()
         repo.commit()
         total += count
+        batch_no += 1
+        if batch_no % _PROGRESS_LOG_EVERY_N_BATCHES == 0:
+            LOG.debug("[%s] progress: %d batches committed, %d rows so far",
+                      label, batch_no, total)
     LOG.info("Cleaned up %(delete_count)s entries for %(model_name)s",
              {'delete_count': total,
               'model_name': model.__name__})
@@ -216,49 +312,81 @@ def _soft_delete_expired_secrets(threshold_date):
     return update_count
 
 
-def _hard_delete_acls_for_soft_deleted_secrets():
-    """Remove acl entries for secrets that have been soft deleted.
+def _hard_delete_acls_for_soft_deleted_secrets(
+        batch_size=DEFAULT_CLEANUP_BATCH_SIZE):
+    """Remove ACL entries for secrets that have been soft deleted, in batches.
 
-    Removes entries in SecretACL and SecretACLUser which are for secrets
-    that have been soft deleted.
+    Removes entries in :class:`models.SecretACL` and
+    :class:`models.SecretACLUser` whose owning secret has been soft deleted.
+    Each batch is committed independently so this stays within InnoDB
+    resource limits even on projects with very large ACL tables.
+
+    :param batch_size: max rows hard-deleted per committed batch.
+    :returns: total ACL rows deleted.
     """
-    session = repo.get_session()
-    acl_user_sub_query = session.query(models.SecretACLUser.id)
-    acl_user_sub_query = acl_user_sub_query.join(models.SecretACL)
-    acl_user_sub_query = acl_user_sub_query.join(models.Secret)
-    acl_user_sub_query = acl_user_sub_query.filter(models.Secret.deleted)
-    acl_user_sub_query = acl_user_sub_query.subquery()
-    acl_user_sub_query = sa_sql.select(acl_user_sub_query)
+    acl_total = 0
+    batch_no = 0
 
-    acl_user_query = session.query(models.SecretACLUser)
-    acl_user_query = acl_user_query.filter(
-        models.SecretACLUser.id.in_(acl_user_sub_query))
-    acl_total = acl_user_query.delete(synchronize_session=False)
+    # SecretACLUser rows: joined-three-table predicate (user -> ACL -> secret).
+    while True:
+        session = repo.get_session()
+        sub_query = session.query(models.SecretACLUser.id)
+        sub_query = sub_query.join(models.SecretACL)
+        sub_query = sub_query.join(models.Secret)
+        sub_query = sub_query.filter(models.Secret.deleted)
+        ids = [row[0] for row in sub_query.limit(batch_size).all()]
+        if not ids:
+            break
+        count = session.query(models.SecretACLUser).filter(
+            models.SecretACLUser.id.in_(ids)
+        ).delete(synchronize_session=False)
+        session.expunge_all()
+        repo.commit()
+        acl_total += count
+        batch_no += 1
+        if batch_no % _PROGRESS_LOG_EVERY_N_BATCHES == 0:
+            LOG.debug("[SecretACLUser] progress: %d batches committed, "
+                      "%d rows so far", batch_no, acl_total)
 
-    acl_sub_query = session.query(models.SecretACL.id)
-    acl_sub_query = acl_sub_query.join(models.Secret)
-    acl_sub_query = acl_sub_query.filter(models.Secret.deleted)
-    acl_sub_query = acl_sub_query.subquery()
-    acl_sub_query = sa_sql.select(acl_sub_query)
+    # SecretACL rows: joined-two-table predicate (ACL -> secret).
+    batch_no = 0
+    while True:
+        session = repo.get_session()
+        sub_query = session.query(models.SecretACL.id)
+        sub_query = sub_query.join(models.Secret)
+        sub_query = sub_query.filter(models.Secret.deleted)
+        ids = [row[0] for row in sub_query.limit(batch_size).all()]
+        if not ids:
+            break
+        count = session.query(models.SecretACL).filter(
+            models.SecretACL.id.in_(ids)
+        ).delete(synchronize_session=False)
+        session.expunge_all()
+        repo.commit()
+        acl_total += count
+        batch_no += 1
+        if batch_no % _PROGRESS_LOG_EVERY_N_BATCHES == 0:
+            LOG.debug("[SecretACL] progress: %d batches committed, "
+                      "%d rows so far", batch_no, acl_total)
 
-    acl_query = session.query(models.SecretACL)
-    acl_query = acl_query.filter(
-        models.SecretACL.id.in_(acl_sub_query))
-    acl_total += acl_query.delete(synchronize_session=False)
     return acl_total
 
 
-def _soft_delete_expired_secret_children(threshold_date, batch_size=10000):
-    """Soft delete the children tables of expired secrets.
+def _soft_delete_expired_secret_children(
+        threshold_date, batch_size=DEFAULT_CLEANUP_BATCH_SIZE):
+    """Soft-delete the children tables of expired secrets, in batches.
 
-    Soft deletes the children tables and hard deletes the ACL children
+    Soft-deletes the children tables and hard-deletes the ACL children
     tables of the expired secrets. Processes rows in batches and commits
     after each batch to avoid unbatched SELECT/UPDATE on large tables.
 
-    :param threshold_date: threshold date for secret expiration
-    :param batch_size: number of rows to update per batch
-    :returns: returns a pair for number of soft delete children and deleted
-              ACLs
+    The id query filters with ``~table.deleted`` so each iteration only
+    picks up rows not yet processed; this guarantees loop termination
+    because every successful batch monotonically shrinks the candidate set.
+
+    :param threshold_date: threshold date for secret expiration.
+    :param batch_size: max rows updated per committed batch.
+    :returns: pair (number of soft-deleted children, number of deleted ACLs).
     """
     current_time = timeutils.utcnow()
 
@@ -272,6 +400,8 @@ def _soft_delete_expired_secret_children(threshold_date, batch_size=10000):
     update_count = 0
 
     for table in secret_children:
+        batch_no = 0
+        label = table.__name__
         while True:
             session = repo.get_session()
             id_query = session.query(table.id)
@@ -292,8 +422,13 @@ def _soft_delete_expired_secret_children(threshold_date, batch_size=10000):
             session.expunge_all()
             repo.commit()
             update_count += count
+            batch_no += 1
+            if batch_no % _PROGRESS_LOG_EVERY_N_BATCHES == 0:
+                LOG.debug("[%s] progress: %d batches committed, "
+                          "%d rows so far", label, batch_no, update_count)
 
-    acl_total = _hard_delete_acls_for_soft_deleted_secrets()
+    acl_total = _hard_delete_acls_for_soft_deleted_secrets(
+        batch_size=batch_size)
     return update_count, acl_total
 
 
@@ -373,13 +508,18 @@ def clean_command(sql_url, min_num_days, do_clean_unassociated_projects,
         cleanup_total += cleanup_all(threshold_date=threshold_date)
         repo.commit()
 
-    except Exception as ex:
-        LOG.exception('Failed to clean up soft deletions in database.')
+    except Exception:
+        # The batched cleanup helpers commit incrementally, so on failure
+        # any batches already committed are durably persisted; only the
+        # in-flight batch is rolled back here. ``cleanup_total`` therefore
+        # reflects the rows that ARE permanently deleted up to the point
+        # of failure -- DO NOT reset it to 0, that would mislead operators
+        # during incident response.
+        LOG.exception('Failed to clean up soft deletions in database. '
+                      '%s entries were committed before the failure.',
+                      cleanup_total)
         repo.rollback()
-        # Batched operations commit incrementally, so some rows may already
-        # be deleted. cleanup_total only reflects the current failed batch.
-        cleanup_total = 0
-        raise ex
+        raise
     finally:
         stop_watch.stop()
         elapsed_time = stop_watch.elapsed()
