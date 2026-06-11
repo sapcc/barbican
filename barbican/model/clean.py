@@ -37,47 +37,6 @@ DEFAULT_CLEANUP_BATCH_SIZE = 10000
 _PROGRESS_LOG_EVERY_N_BATCHES = 10
 
 
-def _batched_delete_by_id(model, id_query, batch_size, op_label):
-    """Delete rows in `model` whose ids are returned by `id_query`, batched.
-
-    Generic helper that powers all batched cleanup paths. Selects up to
-    ``batch_size`` ids per iteration, hard-deletes them, commits, and loops
-    until no more matching ids are found.
-
-    The caller's ``id_query`` MUST be constructed such that already-deleted
-    rows are excluded from subsequent iterations. For pure soft-delete-to-
-    hard-delete loops this is trivially true (the row is gone after DELETE).
-    For more complex queries the caller is responsible for the predicate.
-
-    :param model: ORM model class whose rows are to be deleted.
-    :param id_query: a SQLAlchemy Query yielding primary keys (1-tuples).
-    :param batch_size: max rows per batch.
-    :param op_label: short string used in log messages (e.g. model name).
-    :returns: total rows deleted across all committed batches.
-    """
-    total = 0
-    batch_no = 0
-    while True:
-        session = repo.get_session()
-        ids = [row[0] for row in id_query.limit(batch_size).all()]
-        if not ids:
-            break
-        count = session.query(model).filter(
-            model.id.in_(ids)).delete(synchronize_session=False)
-        # Detach all ORM objects before commit. With expire_on_commit=True
-        # (the default for the scoped session in this project), a commit
-        # would otherwise clear attached objects' __dict__, breaking
-        # callers and tests that hold references to fixture objects.
-        session.expunge_all()
-        repo.commit()
-        total += count
-        batch_no += 1
-        if batch_no % _PROGRESS_LOG_EVERY_N_BATCHES == 0:
-            LOG.debug("[%s] progress: %d batches committed, %d rows so far",
-                      op_label, batch_no, total)
-    return total
-
-
 def cleanup_unassociated_projects():
     """Clean up unassociated projects.
 
