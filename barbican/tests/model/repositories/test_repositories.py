@@ -159,18 +159,19 @@ class WhenTestingBaseRepository(database_utils.RepositoryTestCase):
             "Must supply non-None Entity.",
             str(exception_result))
 
-    def test_should_raise_invalid_create_from_entity_with_id(self):
+    def test_should_allow_create_from_entity_with_id(self):
         entity = models.ModelBase()
         entity.id = '1234'
 
+        # BaseRepo no longer rejects pre-set IDs; the call should proceed
+        # past the id check and fail at _do_validate (missing status), not
+        # on the id guard that was removed to allow custom UUIDs.
         exception_result = self.assertRaises(
             exception.Invalid,
             self.repo.create_from,
             entity)
 
-        self.assertEqual(
-            "Must supply Entity with id=None (i.e. new entity).",
-            str(exception_result))
+        self.assertIn("status", str(exception_result))
 
     def test_should_raise_invalid_do_validate_no_status(self):
         exception_result = self.assertRaises(

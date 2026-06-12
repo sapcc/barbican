@@ -23,6 +23,7 @@ from barbican.common import resources as c_resources
 from barbican.model import models
 from barbican.model import repositories as rep
 from barbican.plugin.crypto import manager
+from barbican.plugin.interface import secret_store as ss_manager
 from barbican.plugin import resources as plugin
 from barbican.tasks import keystone_consumer as consumer
 from barbican.tests import database_utils
@@ -38,6 +39,16 @@ class InitializeDatabaseMixin(object):
                                   ['simple_crypto'],
                                   group='crypto')
 
+        # sapcc-custom: refresh secret_store plugin manager and restore on
+        # teardown so the cleared ``_SECRET_STORE`` does not leak to sibling
+        # tests sharing the stestr worker.
+        self._previous_secret_store = ss_manager._SECRET_STORE
+        ss_manager._SECRET_STORE = None
+        ss_manager.CONF.set_override('enabled_secretstore_plugins',
+                                     ['store_crypto'],
+                                     group='secretstore')
+        self.addCleanup(self._restore_secret_store_manager)
+
         self.project_id1 = uuidutils.generate_uuid()
         self.project_id2 = uuidutils.generate_uuid(dashed=False)
 
@@ -48,6 +59,11 @@ class InitializeDatabaseMixin(object):
         self.project2_data = c_resources.get_or_create_project(
             self.project_id2)
         self.assertIsNotNone(self.project2_data)
+
+    def _restore_secret_store_manager(self):
+        ss_manager._SECRET_STORE = self._previous_secret_store
+        ss_manager.CONF.clear_override('enabled_secretstore_plugins',
+                                       group='secretstore')
 
     def _create_secret_for_project(self, project_data):
 

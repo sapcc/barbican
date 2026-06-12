@@ -154,6 +154,23 @@ class ConstraintCheck(BarbicanException):
     message = u._("A defined SQL constraint check failed: %(error)s")
 
 
+# sapcc-custom: 409s for caller-supplied secret UUID feature.
+class SecretIdConflict(BarbicanHTTPException):
+    """409 - in-project duplicate of caller-supplied secret id."""
+
+    message = u._("A secret with this id already exists in this project.")
+    client_message = message
+    status_code = 409
+
+
+class SecretIdNotAvailable(BarbicanHTTPException):
+    """409 - generic, used for cross-project PK collisions (no info leak)."""
+
+    message = u._("The supplied secret id is not available.")
+    client_message = message
+    status_code = 409
+
+
 class NotSupported(BarbicanException):
     message = u._("Operation is not supported.")
 

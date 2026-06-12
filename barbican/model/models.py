@@ -376,6 +376,10 @@ class Secret(BASE, SoftDeleteMixIn, ModelBase):
         super(Secret, self).__init__()
 
         if parsed_request:
+            if parsed_request.get("id"):
+                # sapcc-custom: caller-supplied UUID, lowercased for MySQL
+                # utf8_bin collation safety.
+                self.id = parsed_request.get("id").lower()
             self.name = parsed_request.get("name")
             self.secret_type = parsed_request.get(
                 "secret_type", utils.SECRET_TYPE_OPAQUE

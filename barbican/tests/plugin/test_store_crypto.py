@@ -672,11 +672,21 @@ class WhenTestingStoreCryptoStoreSecretAndDatum(TestSecretStoreBase):
         self._verify_encrypted_datum_repository_interactions()
 
     def test_with_existing_secret(self):
-        store_crypto._store_secret_and_datum(
-            self.context,
-            self.secret_model,
-            self.kek_meta_project_model,
-            self.response_dto)
+        # The "existing secret" path is the one taken when the secret has
+        # already been persisted to the DB earlier in the same flow.  Setting
+        # ``secret_model.id`` is no longer enough to signal that, because
+        # clients may now supply a custom UUID up-front (see the SecretRepo
+        # custom-UUID feature).  Instead, ``_store_secret_and_datum`` checks
+        # SQLAlchemy's instance state, so we patch it to simulate a
+        # non-transient (already-persisted) model.
+        with mock.patch(
+                'barbican.plugin.store_crypto.sa_inspect') as mock_inspect:
+            mock_inspect.return_value.transient = False
+            store_crypto._store_secret_and_datum(
+                self.context,
+                self.secret_model,
+                self.kek_meta_project_model,
+                self.response_dto)
 
         # Verify the repository interactions.
         self._verify_encrypted_datum_repository_interactions()
