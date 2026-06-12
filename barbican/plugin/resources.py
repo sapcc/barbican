@@ -11,6 +11,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from sqlalchemy import inspect as sa_inspect
+
 from barbican.common import exception
 from barbican.common import utils
 from barbican.model import models
@@ -350,11 +352,26 @@ def _save_secret_metadata_in_repo(secret_model, secret_metadata,
 
 
 def _save_secret_in_repo(secret_model, project_model):
-    """Save a Secret entity."""
+    """Save a Secret entity.
 
+    `_save_secret_in_repo` is invoked at multiple points in the secret
+    lifecycle:
+
+    * Right after a fresh ``models.Secret`` is constructed (must INSERT).
+    * After ``store_crypto._store_secret_and_datum`` has already inserted the
+      row internally (must UPDATE, not re-INSERT).
+    * In the two-step "create-then-store-payload" client flow, where the
+      same model is passed in twice (first call INSERTs, second call
+      UPDATEs metadata).
+
+    Previously the INSERT vs. UPDATE decision was made via
+    ``if not secret_model.id``.  That heuristic no longer holds now that
+    clients may supply a custom UUID up-front (key-recovery feature), so we
+    use SQLAlchemy's instance state instead: only ``transient`` instances
+    have never been added to a session and therefore are not in the DB.
+    """
     secret_repo = repos.get_secret_repository()
-    # Create Secret entities in data store.
-    if not secret_model.id:
+    if sa_inspect(secret_model).transient:
         secret_model.project_id = project_model.id
         secret_repo.create_from(secret_model)
     else:

@@ -13,6 +13,8 @@
 
 import base64
 
+from sqlalchemy import inspect as sa_inspect
+
 from barbican.common import config
 from barbican.common import utils
 from barbican.model import models
@@ -303,8 +305,12 @@ def _find_or_create_kek_objects(plugin_inst, project_model):
 def _store_secret_and_datum(
         context, secret_model, kek_datum_model, generated_dto):
 
-    # Create Secret entities in data store.
-    if not secret_model.id:
+    # Create Secret entities in data store.  We can't use ``secret_model.id``
+    # alone to detect "already persisted", because clients may now supply a
+    # custom UUID up-front (see SecretRepo.create_from for details).  Use
+    # SQLAlchemy's instance state instead: a transient instance has never
+    # been added to a session and therefore does not exist in the DB.
+    if sa_inspect(secret_model).transient:
         secret_model.project_id = context.project_model.id
         repositories.get_secret_repository().create_from(secret_model)
 

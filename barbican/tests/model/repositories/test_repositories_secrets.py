@@ -335,3 +335,162 @@ class WhenTestingQueryFilters(testtools.TestCase,
         self.assertIn('C', secret_names)
         self.assertIn('D', secret_names)
         self.assertIn('E', secret_names)
+
+
+class WhenTestingSecretRepoCustomUUID(database_utils.RepositoryTestCase):
+    """sapcc-custom: tests for caller-supplied UUID path in SecretRepo."""
+
+    CUSTOM_UUID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+
+    def setUp(self):
+        super(WhenTestingSecretRepoCustomUUID, self).setUp()
+        self.repo = repositories.SecretRepo()
+
+    def _make_project(self, session, external_id='recovery-test-project'):
+        project = models.Project()
+        project.external_id = external_id
+        project.save(session=session)
+        return project
+
+    def test_create_secret_with_custom_uuid(self):
+        session = self.repo.get_session()
+        project = self._make_project(session)
+
+        secret_model = models.Secret()
+        secret_model.id = self.CUSTOM_UUID
+        secret_model.project_id = project.id
+        created = self.repo.create_from(secret_model, session=session)
+        session.commit()
+
+        self.assertEqual(self.CUSTOM_UUID, created.id)
+        fetched = self.repo.get_secret_by_id(self.CUSTOM_UUID, session=session)
+        self.assertIsNotNone(fetched)
+        self.assertEqual(self.CUSTOM_UUID, fetched.id)
+
+    def test_create_secret_with_custom_uuid_after_soft_delete(self):
+        """Recreating a deleted key with the same UUID must succeed."""
+        session = self.repo.get_session()
+        project = self._make_project(session)
+
+        # Create and then soft-delete a secret with the target UUID.
+        original = models.Secret()
+        original.id = self.CUSTOM_UUID
+        original.project_id = project.id
+        self.repo.create_from(original, session=session)
+        session.commit()
+
+        self.repo.delete_entity_by_id(self.CUSTOM_UUID,
+                                      'recovery-test-project',
+                                      session=session)
+        session.commit()
+
+        # Re-creating with the same UUID should succeed.
+        replacement = models.Secret()
+        replacement.id = self.CUSTOM_UUID
+        replacement.project_id = project.id
+        replacement.name = 'recovered-key'
+        created = self.repo.create_from(replacement, session=session)
+        session.commit()
+
+        self.assertEqual(self.CUSTOM_UUID, created.id)
+        fetched = self.repo.get_secret_by_id(self.CUSTOM_UUID, session=session)
+        self.assertEqual('recovered-key', fetched.name)
+
+    def test_create_secret_with_custom_uuid_raises_if_active(self):
+        """In-project active duplicate raises HTTP-409 SecretIdConflict."""
+        session = self.repo.get_session()
+        project = self._make_project(session)
+
+        existing = models.Secret()
+        existing.id = self.CUSTOM_UUID
+        existing.project_id = project.id
+        self.repo.create_from(existing, session=session)
+        session.commit()
+
+        duplicate = models.Secret()
+        duplicate.id = self.CUSTOM_UUID
+        duplicate.project_id = project.id
+        err = self.assertRaises(
+            exception.SecretIdConflict,
+            self.repo.create_from,
+            duplicate,
+            session=session,
+        )
+        # status_code attribute confirms HTTP 409 mapping at the
+        # controller layer.
+        self.assertEqual(409, err.status_code)
+
+    def test_custom_uuid_requires_project_id(self):
+        """An entity.id without project_id must be rejected.
+
+        Defence in depth: scoping the duplicate-id lookup is only safe when a
+        project_id is present, so the repo must refuse to proceed without
+        one.
+        """
+        secret_model = models.Secret()
+        secret_model.id = self.CUSTOM_UUID
+        # project_id deliberately not set
+        self.assertRaises(
+            exception.Invalid,
+            self.repo.create_from,
+            secret_model,
+        )
+
+    def test_custom_uuid_collision_in_other_project_is_isolated(self):
+        """Cross-project collision -> SecretIdNotAvailable (no info leak)."""
+        # Use a fresh session for B so the DB PK constraint fires (not the
+        # ORM identity map, which would short-circuit before the DB).
+        session_a = self.repo.get_session()
+        project_a = self._make_project(session_a, external_id='proj-a')
+        project_a_id = project_a.id
+        a_secret = models.Secret()
+        a_secret.id = self.CUSTOM_UUID
+        a_secret.project_id = project_a_id
+        self.repo.create_from(a_secret, session=session_a)
+        session_a.commit()
+        session_a.close()
+
+        session_b = self.repo.get_session()
+        session_b.expunge_all()
+        project_b = self._make_project(session_b, external_id='proj-b')
+        session_b.commit()
+
+        b_secret = models.Secret()
+        b_secret.id = self.CUSTOM_UUID
+        b_secret.project_id = project_b.id
+
+        err = self.assertRaises(
+            exception.SecretIdNotAvailable,
+            self.repo.create_from,
+            b_secret,
+            session=session_b,
+        )
+        self.assertEqual(409, err.status_code)
+        # No UUID / SQL internals leak in the error.
+        err_text = str(err)
+        self.assertNotIn(self.CUSTOM_UUID, err_text)
+        self.assertNotIn('Duplicate', err_text)
+        self.assertNotIn('PRIMARY', err_text)
+        self.assertNotIn(self.CUSTOM_UUID, err.client_message)
+
+        # Project A's row is untouched.
+        session_b.rollback()
+        verify_session = self.repo.get_session()
+        verify_session.expunge_all()
+        a_after = self.repo.get_secret_by_id(self.CUSTOM_UUID,
+                                             session=verify_session)
+        self.assertIsNotNone(a_after)
+        self.assertEqual(project_a_id, a_after.project_id)
+        self.assertFalse(a_after.deleted)
+
+    def test_custom_uuid_uppercase_is_normalised_to_lowercase(self):
+        """Mixed-case UUIDs are canonicalised lowercase by the model."""
+        session = self.repo.get_session()
+        project = self._make_project(session)
+        secret_model = models.Secret(
+            parsed_request={'id': self.CUSTOM_UUID.upper()},
+        )
+        secret_model.project_id = project.id
+        created = self.repo.create_from(secret_model, session=session)
+        session.commit()
+        self.assertEqual(self.CUSTOM_UUID, created.id)

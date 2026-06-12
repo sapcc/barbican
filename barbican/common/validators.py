@@ -182,6 +182,16 @@ class NewSecretValidator(ValidatorBase):
                     "enum": ["true", "false"]
                 },
                 "transport_key_id": {"type": "string"},
+                # sapcc-custom: optional caller-supplied UUID for SSE-KMS
+                # key recovery; lowercase RFC 4122 v4 only.
+                "id": {
+                    "type": "string",
+                    "pattern": (
+                        "^[0-9a-f]{8}-[0-9a-f]{4}-"
+                        "4[0-9a-f]{3}-[89ab][0-9a-f]{3}-"
+                        "[0-9a-f]{12}$"
+                    ),
+                },
             },
         }
 
