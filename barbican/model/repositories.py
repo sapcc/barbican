@@ -598,7 +598,8 @@ class ProjectRepo(BaseRepo):
 class SecretRepo(BaseRepo):
     """Repository for the Secret entity."""
 
-    # sapcc-custom: opt-in to caller-supplied UUIDs; see BaseRepo._allow_preset_id.
+    # sapcc-custom: opt-in to caller-supplied UUIDs;
+    # see BaseRepo._allow_preset_id.
     _allow_preset_id = True
 
     # sapcc-custom: caller-supplied UUID for SSE-KMS key recovery.
