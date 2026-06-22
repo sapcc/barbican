@@ -341,11 +341,21 @@ class BaseRepo(object):
 
         return entity
 
+    # sapcc-custom: SecretRepo sets this True to allow caller-supplied UUIDs;
+    # all other repos keep the default False so the guard below fires.
+    _allow_preset_id = False
+
     def create_from(self, entity, session=None):
         """Sub-class hook: create from entity."""
         if not entity:
             msg = u._(
                 "Must supply non-None {entity_name}."
+            ).format(entity_name=self._do_entity_name())
+            raise exception.Invalid(msg)
+
+        if entity.id and not self._allow_preset_id:
+            msg = u._(
+                "Must supply {entity_name} with id=None (i.e. new entity)."
             ).format(entity_name=self._do_entity_name())
             raise exception.Invalid(msg)
 
@@ -587,6 +597,9 @@ class ProjectRepo(BaseRepo):
 
 class SecretRepo(BaseRepo):
     """Repository for the Secret entity."""
+
+    # sapcc-custom: opt-in to caller-supplied UUIDs; see BaseRepo._allow_preset_id.
+    _allow_preset_id = True
 
     # sapcc-custom: caller-supplied UUID for SSE-KMS key recovery.
     def create_from(self, entity, session=None):
