@@ -1,0 +1,26 @@
+---
+features:
+  - |
+    The PKCS#11 Cryptographic Plugin (``p11_crypto``) now supports
+    asymmetric key generation for RSA and DSA. Previously the plugin
+    raised ``NotImplementedError`` for any order with
+    ``"type": "asymmetric"`` (see ``barbican/model/models.py::OrderType``),
+    which prevented any HSM-backed secret store from serving RSA/DSA
+    key-pair generation requests. Vendor-specific plugins that inherit
+    from ``P11CryptoPlugin`` (for example the ``HSMPartitionCryptoPlugin``
+    used by the Utimaco and Thales HSM stores) automatically gain the
+    same support.
+
+    The key pair is generated in-process using the ``cryptography``
+    library (matching the behaviour of ``SimpleCryptoPlugin``). The
+    serialized private key (PEM PKCS#8, optionally passphrase-encrypted),
+    public key (PEM SubjectPublicKeyInfo), and optional passphrase are
+    then each encrypted with the project's HSM-resident KEK using the
+    plugin's configured ``encryption_mechanism``, so that confidentiality
+    at rest is provided by the HSM.
+
+    The algorithm and key-length matrix advertised by ``supports()`` is
+    unchanged and continues to follow
+    ``PluginSupportTypes.ASYMMETRIC_ALGORITHMS`` (``rsa``, ``dsa``) and
+    ``PluginSupportTypes.ASYMMETRIC_KEY_LENGTHS`` (``1024``, ``2048``,
+    ``4096``).
