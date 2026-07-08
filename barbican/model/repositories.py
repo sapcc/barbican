@@ -632,7 +632,7 @@ class SecretRepo(BaseRepo):
                 if existing is not None:
                     if not existing.deleted:
                         raise exception.SecretIdConflict()
-                    LOG.warning(
+                    LOG.info(
                         "sapcc-custom: hard-purging soft-deleted secret "
                         "id=%s project_id=%s for key-recovery re-create.",
                         existing.id, existing.project_id)
@@ -654,29 +654,35 @@ class SecretRepo(BaseRepo):
                                 synchronize_session=False)
                     session.query(models.Secret).filter_by(id=sid).delete(
                         synchronize_session=False)
-                    session.expire_all()
+                    # sapcc-custom: only evict the purged row from the
+                    # identity map, not the whole session -- lighter than
+                    # session.expire_all() and does not surprise concurrent
+                    # code paths sharing this session.
+                    session.expunge(existing)
                     session.flush()
                 return super(SecretRepo, self).create_from(
                     entity, session=session)
         except exception.SecretIdConflict:
             raise
-        except exception.ConstraintCheck as e:
-            # BaseRepo wraps DBDuplicateEntry into ConstraintCheck with the
-            # raw SQL message -- mask cross-project collisions.
-            sql_err = str(e)
-            if ("Duplicate" in sql_err
-                    or "UNIQUE" in sql_err.upper()
-                    or "IntegrityError" in sql_err):
-                LOG.info("sapcc-custom: cross-project UUID collision "
-                         "rejected (project_id=%s id=%s).",
-                         entity.project_id, entity.id)
-                raise exception.SecretIdNotAvailable()
-            raise
+        except exception.ConstraintCheck:
+            # sapcc-custom: BaseRepo wraps DBDuplicateEntry into
+            # ConstraintCheck. Inside the custom-id branch, any
+            # ConstraintCheck at INSERT time is a UUID collision (either
+            # an in-project race we missed above, or a cross-project PK
+            # collision). Both deserve 409; collapse into the generic
+            # SecretIdNotAvailable so no UUID / SQL is leaked to the
+            # caller.
+            LOG.info("sapcc-custom: caller-supplied UUID rejected at "
+                     "INSERT (project_id=%s id=%s); likely a concurrent "
+                     "duplicate.",
+                     entity.project_id, entity.id)
+            raise exception.SecretIdNotAvailable()
         except (db_exc.DBDuplicateEntry, sa.exc.IntegrityError):
             # Defence in depth in case BaseRepo stops wrapping.
             session.rollback()
-            LOG.info("sapcc-custom: cross-project UUID collision rejected "
-                     "(project_id=%s id=%s).",
+            LOG.info("sapcc-custom: caller-supplied UUID rejected at "
+                     "INSERT (project_id=%s id=%s); likely a concurrent "
+                     "duplicate.",
                      entity.project_id, entity.id)
             raise exception.SecretIdNotAvailable()
 
