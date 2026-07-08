@@ -340,7 +340,10 @@ class WhenTestingQueryFilters(testtools.TestCase,
 class WhenTestingSecretRepoCustomUUID(database_utils.RepositoryTestCase):
     """sapcc-custom: tests for caller-supplied UUID path in SecretRepo."""
 
-    CUSTOM_UUID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    # sapcc-custom: canonical lowercase RFC 4122 v4 UUID used across all
+    # tests in this class.  Must satisfy models._SAPCC_CUSTOM_UUID_V4_RE
+    # since models.Secret now re-validates caller-supplied ids.
+    CUSTOM_UUID = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
 
     def setUp(self):
         super(WhenTestingSecretRepoCustomUUID, self).setUp()

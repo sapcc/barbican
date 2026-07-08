@@ -18,6 +18,7 @@ Defines database models for Barbican
 """
 
 import hashlib
+import re
 
 from oslo_serialization import jsonutils as json
 from oslo_utils import timeutils
@@ -37,6 +38,16 @@ BASE = declarative.declarative_base()
 ERROR_REASON_LENGTH = 255
 SUB_STATUS_LENGTH = 36
 SUB_STATUS_MESSAGE_LENGTH = 255
+
+# sapcc-custom: lowercase RFC 4122 v4 UUID regex, kept in sync with
+# barbican.common.validators.NewSecretValidator. Belt-and-braces
+# re-validation for callers that construct models.Secret directly
+# (e.g. internal code, tests) so the DB never receives a malformed id.
+_SAPCC_CUSTOM_UUID_V4_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-"
+    r"4[0-9a-f]{3}-[89ab][0-9a-f]{3}-"
+    r"[0-9a-f]{12}$"
+)
 
 
 # Allowed entity states
@@ -378,8 +389,16 @@ class Secret(BASE, SoftDeleteMixIn, ModelBase):
         if parsed_request:
             if parsed_request.get("id"):
                 # sapcc-custom: caller-supplied UUID, lowercased for MySQL
-                # utf8_bin collation safety.
-                self.id = parsed_request.get("id").lower()
+                # utf8_bin collation safety.  Re-validate against the same
+                # regex as NewSecretValidator so the DB never receives a
+                # malformed id even when this model is constructed outside
+                # the REST validator path.
+                candidate = parsed_request.get("id").lower()
+                if not _SAPCC_CUSTOM_UUID_V4_RE.match(candidate):
+                    raise exception.Invalid(
+                        u._("Supplied secret id is not a lowercase "
+                            "RFC 4122 v4 UUID."))
+                self.id = candidate
             self.name = parsed_request.get("name")
             self.secret_type = parsed_request.get(
                 "secret_type", utils.SECRET_TYPE_OPAQUE
