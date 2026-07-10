@@ -497,3 +497,184 @@ class WhenTestingSecretRepoCustomUUID(database_utils.RepositoryTestCase):
         created = self.repo.create_from(secret_model, session=session)
         session.commit()
         self.assertEqual(self.CUSTOM_UUID, created.id)
+
+    # sapcc-custom: follow-up review item (dorneanu, PR #44):
+    # verify that hard-purge of a soft-deleted secret actually removes
+    # every child row keyed by secrets.id.  If a new child table is
+    # added to models.py with a FK to secrets.id, extend
+    # _SECRET_CHILD_TABLES below so this test keeps the contract honest.
+    _SECRET_CHILD_TABLES = (
+        models.EncryptedDatum,
+        models.SecretStoreMetadatum,
+        models.SecretUserMetadatum,
+        models.SecretConsumerMetadatum,
+        models.ContainerSecret,
+        models.SecretACL,
+    )
+
+    def test_hard_purge_removes_all_child_rows(self):
+        """Hard-purge on re-create must leave zero rows in every child table.
+
+        Regression guard for the sapcc-custom hard-purge branch in
+        SecretRepo.create_from: it must delete every child row that
+        references the soft-deleted secret via secrets.id before
+        inserting the replacement, so encrypted material, metadata,
+        consumers, container links and ACLs never linger.
+        """
+        session = self.repo.get_session()
+        project = self._make_project(session)
+
+        # 1) Create the original secret.
+        original = models.Secret()
+        original.id = self.CUSTOM_UUID
+        original.project_id = project.id
+        self.repo.create_from(original, session=session)
+
+        # 2) Populate one row in each child table so the test can prove
+        #    the hard-purge actually removes them (not just that empty
+        #    tables stay empty).
+        # EncryptedDatum requires a KEKDatum (kek_id is NOT NULL).
+        kek = models.KEKDatum()
+        kek.plugin_name = 'test-plugin'
+        kek.project_id = project.id
+        kek.save(session=session)
+
+        enc = models.EncryptedDatum(original, kek)
+        enc.cypher_text = 'dummy'
+        enc.save(session=session)
+
+        ssm = models.SecretStoreMetadatum(key='k', value='v')
+        ssm.secret_id = self.CUSTOM_UUID
+        ssm.save(session=session)
+
+        sum_ = models.SecretUserMetadatum(key='uk', value='uv')
+        sum_.secret_id = self.CUSTOM_UUID
+        sum_.save(session=session)
+
+        cons = models.SecretConsumerMetadatum(
+            secret_id=self.CUSTOM_UUID,
+            project_id=project.id,
+            service='svc',
+            resource_type='rtype',
+            resource_id='rid',
+        )
+        cons.save(session=session)
+
+        # A container to hang a ContainerSecret off of.
+        container = models.Container()
+        container.project_id = project.id
+        container.name = 'c'
+        container.type = 'generic'
+        container.save(session=session)
+
+        cs = models.ContainerSecret()
+        cs.container_id = container.id
+        cs.secret_id = self.CUSTOM_UUID
+        cs.save(session=session)
+
+        acl = models.SecretACL(
+            secret_id=self.CUSTOM_UUID,
+            operation='read',
+            project_access=True,
+        )
+        acl.save(session=session)
+
+        session.commit()
+
+        # Sanity: every child table has at least one row for this secret.
+        for table in self._SECRET_CHILD_TABLES:
+            count = (session.query(table)
+                     .filter_by(secret_id=self.CUSTOM_UUID)
+                     .count())
+            self.assertGreaterEqual(
+                count, 1,
+                "pre-purge: expected >=1 row in %s for secret %s" %
+                (table.__name__, self.CUSTOM_UUID))
+
+        # 3) Soft-delete then re-create with the same UUID; this is the
+        #    branch that triggers hard-purge of the soft-deleted row.
+        self.repo.delete_entity_by_id(self.CUSTOM_UUID,
+                                      project.external_id,
+                                      session=session)
+        session.commit()
+
+        replacement = models.Secret()
+        replacement.id = self.CUSTOM_UUID
+        replacement.project_id = project.id
+        self.repo.create_from(replacement, session=session)
+        session.commit()
+
+        # 4) Every child table must now have zero rows for the purged id.
+        #    We use a fresh session so identity-map caches cannot mask
+        #    stale rows.
+        verify_session = self.repo.get_session()
+        verify_session.expunge_all()
+        for table in self._SECRET_CHILD_TABLES:
+            count = (verify_session.query(table)
+                     .filter_by(secret_id=self.CUSTOM_UUID)
+                     .count())
+            self.assertEqual(
+                0, count,
+                "post-purge: expected 0 rows in %s for secret %s, found %d" %
+                (table.__name__, self.CUSTOM_UUID, count))
+
+        # And the replacement secret itself is present exactly once and
+        # is not soft-deleted.
+        secrets = (verify_session.query(models.Secret)
+                   .filter_by(id=self.CUSTOM_UUID).all())
+        self.assertEqual(1, len(secrets))
+        self.assertFalse(secrets[0].deleted)
+
+    def test_concurrent_custom_uuid_creation_yields_one_success(self):
+        """Two callers racing on the same UUID -> exactly one succeeds.
+
+        Simulates the concurrency scenario dorneanu called out on PR #44:
+        two independent sessions try to create a secret with the same
+        caller-supplied UUID in the same project.  The second INSERT
+        must observe the row committed by the first and be rejected via
+        the sapcc-custom SecretIdConflict / SecretIdNotAvailable path,
+        not silently create a duplicate.
+        """
+        # Session A commits first.
+        session_a = self.repo.get_session()
+        project_a = self._make_project(session_a,
+                                       external_id='concurrent-proj')
+        project_id = project_a.id
+        first = models.Secret()
+        first.id = self.CUSTOM_UUID
+        first.project_id = project_id
+        self.repo.create_from(first, session=session_a)
+        session_a.commit()
+        session_a.close()
+
+        # Session B starts *after* A committed and tries the same UUID
+        # in the same project.  In production the two sessions belong
+        # to different requests; here a fresh session is a faithful
+        # stand-in because SQLite (used by the test harness) serialises
+        # writes but still exposes the committed row to session B.
+        session_b = self.repo.get_session()
+        session_b.expunge_all()
+        second = models.Secret()
+        second.id = self.CUSTOM_UUID
+        second.project_id = project_id
+
+        err = self.assertRaises(
+            (exception.SecretIdConflict,
+             exception.SecretIdNotAvailable),
+            self.repo.create_from,
+            second,
+            session=session_b,
+        )
+        self.assertEqual(409, err.status_code)
+
+        # The DB still holds exactly one active row for this UUID, and
+        # it is the one session A wrote (project_id matches, deleted is
+        # False).
+        session_b.rollback()
+        verify_session = self.repo.get_session()
+        verify_session.expunge_all()
+        rows = (verify_session.query(models.Secret)
+                .filter_by(id=self.CUSTOM_UUID).all())
+        self.assertEqual(1, len(rows))
+        self.assertEqual(project_id, rows[0].project_id)
+        self.assertFalse(rows[0].deleted)
