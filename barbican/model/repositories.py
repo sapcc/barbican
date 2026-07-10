@@ -341,6 +341,10 @@ class BaseRepo(object):
 
         return entity
 
+    # sapcc-custom: SecretRepo sets this True to allow caller-supplied UUIDs;
+    # all other repos keep the default False so the guard below fires.
+    _allow_preset_id = False
+
     def create_from(self, entity, session=None):
         """Sub-class hook: create from entity."""
         if not entity:
@@ -349,7 +353,7 @@ class BaseRepo(object):
             ).format(entity_name=self._do_entity_name())
             raise exception.Invalid(msg)
 
-        if entity.id:
+        if entity.id and not self._allow_preset_id:
             msg = u._(
                 "Must supply {entity_name} with id=None (i.e. new entity)."
             ).format(entity_name=self._do_entity_name())
@@ -593,6 +597,94 @@ class ProjectRepo(BaseRepo):
 
 class SecretRepo(BaseRepo):
     """Repository for the Secret entity."""
+
+    # sapcc-custom: opt-in to caller-supplied UUIDs;
+    # see BaseRepo._allow_preset_id.
+    _allow_preset_id = True
+
+    # sapcc-custom: caller-supplied UUID for SSE-KMS key recovery.
+    def create_from(self, entity, session=None):
+        """Create a Secret, optionally with a caller-supplied UUID.
+
+        sapcc-custom extension (not in upstream openstack/barbican).
+        Lookup is project-scoped; cross-project PK collisions surface as a
+        generic 409 to avoid disclosing other tenants' secret IDs.
+        """
+        if not entity.id:
+            return super(SecretRepo, self).create_from(
+                entity, session=session)
+
+        # sapcc-custom: project_id is required to scope the duplicate check.
+        if not entity.project_id:
+            raise exception.Invalid(
+                u._("project_id must be set when supplying a custom secret "
+                    "id."))
+
+        session = self.get_session(session)
+
+        try:
+            # SAVEPOINT keeps purge+insert atomic.
+            with session.begin_nested():
+                existing = (session.query(models.Secret)
+                            .filter_by(id=entity.id,
+                                       project_id=entity.project_id)
+                            .first())
+                if existing is not None:
+                    if not existing.deleted:
+                        raise exception.SecretIdConflict()
+                    LOG.info(
+                        "sapcc-custom: hard-purging soft-deleted secret "
+                        "id=%s project_id=%s for key-recovery re-create.",
+                        existing.id, existing.project_id)
+                    # sapcc-custom: hard-purge the soft-deleted row + its
+                    # children with explicit row-level DELETEs so SQLAlchemy
+                    # does not try to NULL-out the NOT-NULL foreign keys on
+                    # secret_id (encrypted_data, secret_store_metadata,
+                    # secret_user_metadata, secret_consumer_metadata,
+                    # container_secret, secret_acls).
+                    sid = existing.id
+                    for table in (models.EncryptedDatum,
+                                  models.SecretStoreMetadatum,
+                                  models.SecretUserMetadatum,
+                                  models.SecretConsumerMetadatum,
+                                  models.ContainerSecret,
+                                  models.SecretACL):
+                        session.query(table).filter_by(
+                            secret_id=sid).delete(
+                                synchronize_session=False)
+                    session.query(models.Secret).filter_by(id=sid).delete(
+                        synchronize_session=False)
+                    # sapcc-custom: only evict the purged row from the
+                    # identity map, not the whole session -- lighter than
+                    # session.expire_all() and does not surprise concurrent
+                    # code paths sharing this session.
+                    session.expunge(existing)
+                    session.flush()
+                return super(SecretRepo, self).create_from(
+                    entity, session=session)
+        except exception.SecretIdConflict:
+            raise
+        except exception.ConstraintCheck:
+            # sapcc-custom: BaseRepo wraps DBDuplicateEntry into
+            # ConstraintCheck. Inside the custom-id branch, any
+            # ConstraintCheck at INSERT time is a UUID collision (either
+            # an in-project race we missed above, or a cross-project PK
+            # collision). Both deserve 409; collapse into the generic
+            # SecretIdNotAvailable so no UUID / SQL is leaked to the
+            # caller.
+            LOG.info("sapcc-custom: caller-supplied UUID rejected at "
+                     "INSERT (project_id=%s id=%s); likely a concurrent "
+                     "duplicate.",
+                     entity.project_id, entity.id)
+            raise exception.SecretIdNotAvailable()
+        except (db_exc.DBDuplicateEntry, sa.exc.IntegrityError):
+            # Defence in depth in case BaseRepo stops wrapping.
+            session.rollback()
+            LOG.info("sapcc-custom: caller-supplied UUID rejected at "
+                     "INSERT (project_id=%s id=%s); likely a concurrent "
+                     "duplicate.",
+                     entity.project_id, entity.id)
+            raise exception.SecretIdNotAvailable()
 
     def get_secret_list(self, external_project_id,
                         offset_arg=None, limit_arg=None,

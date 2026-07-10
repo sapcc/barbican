@@ -1750,3 +1750,67 @@ class WhenTestingSecretConsumerValidator(utils.BaseTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class WhenTestingSecretValidatorCustomUUID(utils.BaseTestCase):
+    """sapcc-custom: validator enforces lowercase RFC 4122 v4 UUIDs."""
+
+    VALID_UUID = '550e8400-e29b-41d4-a716-446655440000'
+    UPPERCASE_UUID = '550E8400-E29B-41D4-A716-446655440000'
+    NOT_V4_UUID = '550e8400-e29b-11d4-a716-446655440000'  # version=1
+    BAD_VARIANT_UUID = '550e8400-e29b-41d4-7716-446655440000'  # variant=7
+
+    def setUp(self):
+        super(WhenTestingSecretValidatorCustomUUID, self).setUp()
+        self.validator = validators.NewSecretValidator()
+        self.secret_req = {
+            'name': 'test-secret',
+            'secret_type': 'symmetric',
+            'algorithm': 'aes',
+            'bit_length': 256,
+        }
+
+    def test_should_accept_valid_v4_uuid(self):
+        self.secret_req['id'] = self.VALID_UUID
+        result = self.validator.validate(self.secret_req)
+        self.assertEqual(self.VALID_UUID, result['id'])
+
+    def test_should_reject_uppercase_uuid(self):
+        self.secret_req['id'] = self.UPPERCASE_UUID
+        self.assertRaises(
+            excep.InvalidObject,
+            self.validator.validate,
+            self.secret_req,
+        )
+
+    def test_should_reject_non_v4_uuid(self):
+        self.secret_req['id'] = self.NOT_V4_UUID
+        self.assertRaises(
+            excep.InvalidObject,
+            self.validator.validate,
+            self.secret_req,
+        )
+
+    def test_should_reject_bad_variant_uuid(self):
+        self.secret_req['id'] = self.BAD_VARIANT_UUID
+        self.assertRaises(
+            excep.InvalidObject,
+            self.validator.validate,
+            self.secret_req,
+        )
+
+    def test_should_reject_invalid_uuid_format(self):
+        self.secret_req['id'] = 'not-a-uuid'
+        self.assertRaises(
+            excep.InvalidObject,
+            self.validator.validate,
+            self.secret_req,
+        )
+
+    def test_should_reject_empty_id(self):
+        self.secret_req['id'] = ''
+        self.assertRaises(
+            excep.InvalidObject,
+            self.validator.validate,
+            self.secret_req,
+        )
