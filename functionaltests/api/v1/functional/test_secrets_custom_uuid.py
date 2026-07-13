@@ -113,5 +113,5 @@ class SecretsCustomUUIDTestCase(base.TestCase):
             resp, _ = self.behaviors.create_secret(model, user_name=admin_a)
             self.assertEqual(
                 400, resp.status_code,
-                msg='UUID %r should have been rejected with 400, got %d'
-                    % (bad, resp.status_code))
+                'UUID %r should have been rejected with 400, got %d'
+                % (bad, resp.status_code))
