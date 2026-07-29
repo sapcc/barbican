@@ -1,0 +1,43 @@
+---
+fixes:
+  - |
+    [SAPCC] Make the ``p11_crypto`` plugin resilient to a transiently
+    unreachable HSM at ``barbican-api`` startup.
+
+    **Cause.** ``P11CryptoPlugin.__init__`` calls
+    ``pkcs11.PKCS11(...)`` exactly once via ``_create_pkcs11``. If the
+    PKCS#11 client library reports ``CKR_TOKEN_NOT_PRESENT`` /
+    ``CKR_CRYPTOKI_NOT_INITIALIZED`` at that instant (Thales Luna HA
+    groups can look empty for a short window while the lunaclient
+    sidecar establishes its socket to the appliance), the resulting
+    ``P11CryptoTokenException`` / ``P11CryptoPluginException`` bubbled
+    all the way out and the process either segfaulted (kubelet
+    ``Error / exit 139``) or entered a permanently-broken
+    ``MultipleStorePluginValueMissing`` state. The only remedy in
+    production was a rolling ``barbican-api`` restart to hope that
+    the next process caught the Luna group in a converged moment.
+
+    **Fix.** ``_create_pkcs11`` is now wrapped in
+    ``_create_pkcs11_with_retry`` which retries the underlying call
+    with exponential backoff on ``P11CryptoTokenException`` /
+    ``P11CryptoPluginException``. Three new ``p11_crypto_plugin``
+    config options are exposed:
+
+    * ``plugin_init_retries`` (default ``5``, min ``1``) — total
+      attempts, including the initial one. Set to ``1`` to preserve
+      the pre-SAPCC behaviour.
+    * ``plugin_init_retry_delay`` (default ``2.0``, seconds) —
+      initial delay between attempts.
+    * ``plugin_init_retry_max_delay`` (default ``30.0``, seconds) —
+      cap for the exponential backoff.
+
+    Behaviour on the request path is unchanged; ``_reinitialize_pkcs11``
+    is not touched. Only the startup / plugin-load path retries.
+
+    **Impact.** No auth or crypto behaviour change. When the HSM is
+    healthy, startup takes the same time as before (single successful
+    call). When the HSM is transiently unavailable, startup waits up
+    to ``sum(min(retry_delay*2^n, max_delay) for n in ...)`` seconds
+    across ``plugin_init_retries-1`` retries before giving up.
+    Recommended for any deployment behind a Thales / Utimaco HA
+    group.

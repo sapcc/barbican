@@ -336,6 +336,59 @@ class WhenTestingP11CryptoPlugin(utils.BaseTestCase):
         lib.C_SeedRandom.assert_called_once_with(mock.ANY, mock.ANY, 32)
         self.cfg_mock.p11_crypto_plugin.seed_file = ''
 
+    def test_create_pkcs11_with_retry_recovers_after_transient_failure(self):
+        # SAPCC: verify that a transient P11CryptoTokenException at plugin
+        # init time is retried instead of poisoning the plugin.
+        self.cfg_mock.p11_crypto_plugin.plugin_init_retries = 3
+        self.cfg_mock.p11_crypto_plugin.plugin_init_retry_delay = 0.01
+        self.cfg_mock.p11_crypto_plugin.plugin_init_retry_max_delay = 0.02
+
+        sentinel = mock.sentinel.pkcs11
+        calls = {'n': 0}
+
+        def _fake_create(ffi=None):
+            calls['n'] += 1
+            if calls['n'] < 3:
+                raise ex.P11CryptoTokenException(
+                    'transient: token missing on attempt {}'.format(calls['n'])
+                )
+            return sentinel
+
+        with mock.patch(
+                'barbican.plugin.crypto.p11_crypto.time.sleep',
+        ) as sleep_mock, \
+                mock.patch.object(p11_crypto.P11CryptoPlugin,
+                                  '_create_pkcs11', side_effect=_fake_create):
+            self.plugin.conf = self.cfg_mock
+            result = self.plugin._create_pkcs11_with_retry()
+
+        self.assertIs(sentinel, result)
+        self.assertEqual(3, calls['n'])
+        # Two retries -> two sleeps.
+        self.assertEqual(2, sleep_mock.call_count)
+
+    def test_create_pkcs11_with_retry_gives_up_after_max_attempts(self):
+        # SAPCC: verify the final exception is re-raised after the retry
+        # budget is exhausted.
+        self.cfg_mock.p11_crypto_plugin.plugin_init_retries = 2
+        self.cfg_mock.p11_crypto_plugin.plugin_init_retry_delay = 0.01
+        self.cfg_mock.p11_crypto_plugin.plugin_init_retry_max_delay = 0.02
+
+        create_kw = {
+            'side_effect': ex.P11CryptoPluginException('permanent'),
+        }
+        with mock.patch('barbican.plugin.crypto.p11_crypto.time.sleep'), \
+                mock.patch.object(
+                    p11_crypto.P11CryptoPlugin,
+                    '_create_pkcs11',
+                    **create_kw) as create_mock:
+            self.plugin.conf = self.cfg_mock
+            self.assertRaises(
+                ex.P11CryptoPluginException,
+                self.plugin._create_pkcs11_with_retry,
+            )
+        self.assertEqual(2, create_mock.call_count)
+
     def test_call_pkcs11_with_token_error(self):
         self.plugin._encrypt = mock.Mock()
         self.plugin._encrypt.side_effect = [ex.P11CryptoTokenException(
