@@ -1,0 +1,66 @@
+---
+fixes:
+  - |
+    [SAPCC] Silence the ``pecan.core``-level ERROR log
+    "Controller 'on_get' defined does not support content_type
+    'image/vnd.microsoft.icon'. Supported type(s): ..." that was
+    surfacing in Sentry (project ``monsoon/barbican``) as an
+    ``error``-level incident every time an HTTP client (typically a
+    browser doing an automatic favicon probe) hit the API root ``/``
+    or ``/v1/`` with an ``Accept`` header that was not one of
+    ``application/json`` / ``application/json-home``.
+
+    **Cause.** ``VersionsController.on_get`` and ``V1Controller.on_get``
+    are the two Pecan endpoints that answer the unauthenticated version
+    listing at ``/`` and ``/v1/``. Both were decorated with
+    ``@utils.allow_certain_content_types(MIME_TYPE_JSON,
+    MIME_TYPE_JSON_HOME)`` which asks Pecan to strictly reject any
+    request whose ``Accept`` header does not match one of those two
+    MIME types. On mismatch Pecan (``pecan/core.py``) executes
+    ``logger.error("Controller '%s' defined does not support
+    content_type '%s'. Supported type(s): %s", ...)`` and raises
+    ``webob.exc.HTTPNotAcceptable`` (406). Barbican's logging config
+    forwards every ``ERROR`` record through the raven ``SentryHandler``,
+    so every such 406 becomes a Sentry issue even though the response
+    itself is a plain client-side content-negotiation failure. Sentry
+    reports it without request context (URL / method / user_agent are
+    ``null``) because barbican's raven wiring only ships the LogRecord,
+    not the WSGI environ, which makes triage extra confusing — the
+    tag ``logger=pecan.core`` and the literal ``image/vnd.microsoft.icon``
+    string in the message are the only clues.
+
+    In production Sentry this fires exactly when a browser tab is
+    opened against a barbican API URL: browsers automatically issue a
+    second request with ``Accept: image/vnd.microsoft.icon`` looking
+    for a favicon and it ends up on the same route. It has never been
+    triggered by any real key-manager client (``openstack``,
+    ``castellan``, ``cronus``, ``python-barbicanclient`` etc. all
+    send ``Accept: application/json``) and it is confined to the
+    unauthenticated version-listing controllers — the authenticated
+    ``/v1/secrets``, ``/v1/containers``, ``/v1/orders`` etc. handlers
+    have their own decorators and are not affected. Observed volume
+    across the SAPCC fleet is very low and sporadic (single-digit
+    events in the observation window), scoped to a couple of regions
+    where an operator opened the API URL in a browser.
+
+    **Impact.** Cosmetic Sentry log noise only. The HTTP response
+    that the client received (406 Not Acceptable) is unchanged. No
+    auth check is bypassed, no policy is loosened, no data is exposed,
+    and no other logger / metric is affected.
+
+    **Fix.** Replace ``@utils.allow_certain_content_types(MIME_TYPE_JSON,
+    MIME_TYPE_JSON_HOME)`` with ``@utils.allow_all_content_types`` on
+    both ``V1Controller.on_get`` and ``VersionsController.on_get``.
+    ``allow_all_content_types`` registers every entry in
+    ``mimetypes.types_map`` as an accepted content type on the Pecan
+    controller, which stops Pecan from taking the "reject and log
+    ERROR" branch. Response rendering is untouched: both methods
+    remain decorated with ``@index.when(method='GET', template='json')``
+    and ``VersionsController.on_get`` additionally calls
+    ``pecan.core.override_template('json')``, so the returned body is
+    still JSON regardless of what the caller asked for in ``Accept``
+    — matching the de-facto behaviour of most other OpenStack API
+    root endpoints. No auth or authorization behaviour changes.
+
+    No matching upstream Launchpad or ``openstack/barbican`` GitHub
+    issue was found at the time of writing.
