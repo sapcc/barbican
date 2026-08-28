@@ -715,7 +715,8 @@ class SecretRepo(BaseRepo):
 
                 return super(SecretRepo, self).create_from(
                     entity, session=session)
-        except (exception.SecretIdConflict, exception.SecretRecoverNoTombstone):
+        except (exception.SecretIdConflict,
+                exception.SecretRecoverNoTombstone):
             raise
         except exception.ConstraintCheck:
             # sapcc-custom: BaseRepo wraps DBDuplicateEntry into
