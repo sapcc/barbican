@@ -2120,9 +2120,27 @@ class SecretACLRepo(BaseRepo):
     def create_or_replace_from(self, secret, secret_acl, user_ids=None,
                                session=None):
         session = self.get_session(session)
+
+        # sapcc-custom: if a soft-deleted tombstone exists for the same
+        # (secret_id, operation), revive it in-place to avoid violating the
+        # _secret_acl_operation_uc unique constraint on (secret_id, operation).
+        tombstone = session.query(models.SecretACL).filter_by(
+            secret_id=secret.id,
+            operation=secret_acl.operation,
+            deleted=True,
+        ).first()
+        if tombstone is not None:
+            tombstone.deleted = False
+            tombstone.deleted_at = None
+            if secret_acl.project_access is not None:
+                tombstone.project_access = secret_acl.project_access
+            tombstone.updated_at = timeutils.utcnow()
+            secret_acl = tombstone
+
         secret.updated_at = timeutils.utcnow()
         secret_acl.updated_at = timeutils.utcnow()
-        secret.secret_acls.append(secret_acl)
+        if secret_acl not in secret.secret_acls:
+            secret.secret_acls.append(secret_acl)
         secret.save(session=session)
 
         self._create_or_replace_acl_users(secret_acl, user_ids,
@@ -2152,8 +2170,15 @@ class SecretACLRepo(BaseRepo):
 
         for acl_user in secret_acl.acl_users:
             if acl_user.deleted:
-                continue
-            if acl_user.user_id in user_ids:  # input user_id already exists
+                if acl_user.user_id in user_ids:
+                    # Revive soft-deleted user to avoid UniqueConstraint on
+                    # (acl_id, user_id) when re-adding a previously removed user.
+                    acl_user.deleted = False
+                    acl_user.deleted_at = None
+                    acl_user.updated_at = now
+                    user_ids.remove(acl_user.user_id)
+                # else: leave soft-deleted, it's excluded by query filters
+            elif acl_user.user_id in user_ids:  # input user_id already exists
                 acl_user.updated_at = now
                 user_ids.remove(acl_user.user_id)
             else:
