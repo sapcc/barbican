@@ -2171,8 +2171,8 @@ class SecretACLRepo(BaseRepo):
         for acl_user in secret_acl.acl_users:
             if acl_user.deleted:
                 if acl_user.user_id in user_ids:
-                    # Revive soft-deleted user to avoid UniqueConstraint on
-                    # (acl_id, user_id) when re-adding a previously removed user.
+                    # Revive soft-deleted user to avoid UniqueConstraint
+                    # on (acl_id, user_id) when re-adding a removed user.
                     acl_user.deleted = False
                     acl_user.deleted_at = None
                     acl_user.updated_at = now
