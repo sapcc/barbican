@@ -271,10 +271,6 @@ def clean_paging_values(offset_arg=0, limit_arg=CONF.default_limit_paging):
         % {"limit": limit, "offset": offset}
     )
 
-    LOG.debug("Clean paging values limit=%(limit)s, offset=%(offset)s" %
-              {'limit': limit,
-               'offset': offset})
-
     return offset, limit
 
 
@@ -640,6 +636,21 @@ class SecretRepo(BaseRepo):
                         raise exception.SecretIdConflict()
 
                     sid = existing.id
+                    # Collect ACL IDs once; used by both branches to handle
+                    # SecretACLUser FK (acl_id) before touching SecretACL rows.
+                    acl_ids = [
+                        row.id for row in
+                        session.query(models.SecretACL.id).filter_by(
+                            secret_id=sid)
+                    ]
+                    _SECRET_CHILD_TABLES = (
+                        models.EncryptedDatum,
+                        models.SecretStoreMetadatum,
+                        models.SecretUserMetadatum,
+                        models.SecretConsumerMetadatum,
+                        models.ContainerSecret,
+                        models.SecretACL,
+                    )
 
                     if recover:
                         # sapcc-custom: revive the tombstoned secret and all
@@ -649,31 +660,22 @@ class SecretRepo(BaseRepo):
                             "sapcc-custom: reviving tombstoned secret "
                             "id=%s project_id=%s (recover=true).",
                             sid, existing.project_id)
-                        now = None  # NULL out deleted_at
-                        revive = {"deleted": False, "deleted_at": now}
+                        revive = {"deleted": False, "deleted_at": None,
+                                  "updated_at": timeutils.utcnow()}
                         # Revive SecretACLUser rows first (FK: acl_id ->
                         # secret_acls.id) before reviving SecretACL rows.
-                        acl_ids = [
-                            row.id for row in
-                            session.query(models.SecretACL.id).filter_by(
-                                secret_id=sid)
-                        ]
                         if acl_ids:
                             session.query(models.SecretACLUser).filter(
                                 models.SecretACLUser.acl_id.in_(acl_ids)
                             ).update(revive, synchronize_session=False)
-                        for table in (models.EncryptedDatum,
-                                      models.SecretStoreMetadatum,
-                                      models.SecretUserMetadatum,
-                                      models.SecretConsumerMetadatum,
-                                      models.ContainerSecret,
-                                      models.SecretACL):
+                        for table in _SECRET_CHILD_TABLES:
                             session.query(table).filter_by(
                                 secret_id=sid).update(
                                     revive, synchronize_session=False)
-                        session.query(models.Secret).filter_by(
-                            id=sid).update(revive, synchronize_session=False)
-                        session.expire(existing)
+                        # Mutate the loaded ORM object directly; avoids a
+                        # bulk UPDATE + expire + implicit re-SELECT cycle.
+                        existing.deleted = False
+                        existing.deleted_at = None
                         session.flush()
                         return existing
                     else:
@@ -687,21 +689,11 @@ class SecretRepo(BaseRepo):
                             "sapcc-custom: hard-purging soft-deleted secret "
                             "id=%s project_id=%s for key-recovery re-create.",
                             sid, existing.project_id)
-                        acl_ids = [
-                            row.id for row in
-                            session.query(models.SecretACL.id).filter_by(
-                                secret_id=sid)
-                        ]
                         if acl_ids:
                             session.query(models.SecretACLUser).filter(
                                 models.SecretACLUser.acl_id.in_(acl_ids)
                             ).delete(synchronize_session=False)
-                        for table in (models.EncryptedDatum,
-                                      models.SecretStoreMetadatum,
-                                      models.SecretUserMetadatum,
-                                      models.SecretConsumerMetadatum,
-                                      models.ContainerSecret,
-                                      models.SecretACL):
+                        for table in _SECRET_CHILD_TABLES:
                             session.query(table).filter_by(
                                 secret_id=sid).delete(
                                     synchronize_session=False)
@@ -2216,7 +2208,7 @@ class SecretACLUserRepo(BaseRepo):
         """Sub-class hook: build a retrieve query."""
 
         query = session.query(models.SecretACLUser)
-        query = query.filter_by(id=entity_id)
+        query = query.filter_by(id=entity_id, deleted=False)
 
         return query
 
