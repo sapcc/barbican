@@ -609,6 +609,11 @@ class SecretRepo(BaseRepo):
         sapcc-custom extension (not in upstream openstack/barbican).
         Lookup is project-scoped; cross-project PK collisions surface as a
         generic 409 to avoid disclosing other tenants' secret IDs.
+
+        When entity.recover is True and a soft-deleted tombstone exists, all
+        soft-deleted child rows (metadata, consumers, container-secrets, ACLs)
+        are revived in-place instead of being purged and re-inserted.  If no
+        tombstone is found with recover=True, a 409 is returned.
         """
         if not entity.id:
             return super(SecretRepo, self).create_from(
@@ -621,9 +626,10 @@ class SecretRepo(BaseRepo):
                     "id."))
 
         session = self.get_session(session)
+        recover = getattr(entity, "recover", False)
 
         try:
-            # SAVEPOINT keeps purge+insert atomic.
+            # SAVEPOINT keeps the operation atomic.
             with session.begin_nested():
                 existing = (session.query(models.Secret)
                             .filter_by(id=entity.id,
@@ -632,37 +638,84 @@ class SecretRepo(BaseRepo):
                 if existing is not None:
                     if not existing.deleted:
                         raise exception.SecretIdConflict()
-                    LOG.info(
-                        "sapcc-custom: hard-purging soft-deleted secret "
-                        "id=%s project_id=%s for key-recovery re-create.",
-                        existing.id, existing.project_id)
-                    # sapcc-custom: hard-purge the soft-deleted row + its
-                    # children with explicit row-level DELETEs so SQLAlchemy
-                    # does not try to NULL-out the NOT-NULL foreign keys on
-                    # secret_id (encrypted_data, secret_store_metadata,
-                    # secret_user_metadata, secret_consumer_metadata,
-                    # container_secret, secret_acls).
+
                     sid = existing.id
-                    for table in (models.EncryptedDatum,
-                                  models.SecretStoreMetadatum,
-                                  models.SecretUserMetadatum,
-                                  models.SecretConsumerMetadatum,
-                                  models.ContainerSecret,
-                                  models.SecretACL):
-                        session.query(table).filter_by(
-                            secret_id=sid).delete(
-                                synchronize_session=False)
-                    session.query(models.Secret).filter_by(id=sid).delete(
-                        synchronize_session=False)
-                    # sapcc-custom: only evict the purged row from the
-                    # identity map, not the whole session -- lighter than
-                    # session.expire_all() and does not surprise concurrent
-                    # code paths sharing this session.
-                    session.expunge(existing)
-                    session.flush()
+
+                    if recover:
+                        # sapcc-custom: revive the tombstoned secret and all
+                        # its soft-deleted children so consumers/containers
+                        # continue working without recreation.
+                        LOG.info(
+                            "sapcc-custom: reviving tombstoned secret "
+                            "id=%s project_id=%s (recover=true).",
+                            sid, existing.project_id)
+                        now = None  # NULL out deleted_at
+                        revive = {"deleted": False, "deleted_at": now}
+                        # Revive SecretACLUser rows first (FK: acl_id ->
+                        # secret_acls.id) before reviving SecretACL rows.
+                        acl_ids = [
+                            row.id for row in
+                            session.query(models.SecretACL.id).filter_by(
+                                secret_id=sid)
+                        ]
+                        if acl_ids:
+                            session.query(models.SecretACLUser).filter(
+                                models.SecretACLUser.acl_id.in_(acl_ids)
+                            ).update(revive, synchronize_session=False)
+                        for table in (models.EncryptedDatum,
+                                      models.SecretStoreMetadatum,
+                                      models.SecretUserMetadatum,
+                                      models.SecretConsumerMetadatum,
+                                      models.ContainerSecret,
+                                      models.SecretACL):
+                            session.query(table).filter_by(
+                                secret_id=sid).update(
+                                    revive, synchronize_session=False)
+                        session.query(models.Secret).filter_by(
+                            id=sid).update(revive, synchronize_session=False)
+                        session.expire(existing)
+                        session.flush()
+                        return existing
+                    else:
+                        # sapcc-custom: hard-purge the soft-deleted row + its
+                        # children with explicit row-level DELETEs so
+                        # SQLAlchemy does not try to NULL-out the NOT-NULL
+                        # foreign keys on secret_id.
+                        # Delete SecretACLUser rows (FK: acl_id) before
+                        # SecretACL rows to avoid FK constraint violations.
+                        LOG.info(
+                            "sapcc-custom: hard-purging soft-deleted secret "
+                            "id=%s project_id=%s for key-recovery re-create.",
+                            sid, existing.project_id)
+                        acl_ids = [
+                            row.id for row in
+                            session.query(models.SecretACL.id).filter_by(
+                                secret_id=sid)
+                        ]
+                        if acl_ids:
+                            session.query(models.SecretACLUser).filter(
+                                models.SecretACLUser.acl_id.in_(acl_ids)
+                            ).delete(synchronize_session=False)
+                        for table in (models.EncryptedDatum,
+                                      models.SecretStoreMetadatum,
+                                      models.SecretUserMetadatum,
+                                      models.SecretConsumerMetadatum,
+                                      models.ContainerSecret,
+                                      models.SecretACL):
+                            session.query(table).filter_by(
+                                secret_id=sid).delete(
+                                    synchronize_session=False)
+                        session.query(models.Secret).filter_by(
+                            id=sid).delete(synchronize_session=False)
+                        session.expunge(existing)
+                        session.flush()
+                elif recover:
+                    # recover=True but no tombstone — nothing to revive.
+                    raise exception.SecretRecoverNoTombstone()
+
                 return super(SecretRepo, self).create_from(
                     entity, session=session)
-        except exception.SecretIdConflict:
+        except (exception.SecretIdConflict, exception.SecretRecoverNoTombstone):
             raise
         except exception.ConstraintCheck:
             # sapcc-custom: BaseRepo wraps DBDuplicateEntry into
@@ -679,7 +732,10 @@ class SecretRepo(BaseRepo):
             raise exception.SecretIdNotAvailable()
         except (db_exc.DBDuplicateEntry, sa.exc.IntegrityError):
             # Defence in depth in case BaseRepo stops wrapping.
-            session.rollback()
+            # Do NOT call session.rollback() here — the begin_nested()
+            # SAVEPOINT already rolled back automatically; a full rollback
+            # would discard unrelated changes made earlier in the same
+            # request (e.g. a newly created project row).
             LOG.info("sapcc-custom: caller-supplied UUID rejected at "
                      "INSERT (project_id=%s id=%s); likely a concurrent "
                      "duplicate.",

@@ -412,6 +412,9 @@ class Secret(BASE, SoftDeleteMixIn, ModelBase):
             self.mode = parsed_request.get("mode")
             self.creator_id = parsed_request.get("creator_id")
             self.project_id = parsed_request.get("project_id")
+            # sapcc-custom: recover=True revives tombstone instead of purging.
+            # Not a DB column — passed through to SecretRepo.create_from only.
+            self.recover = parsed_request.get("recover", False)
 
         self.status = States.ACTIVE
 
@@ -1257,7 +1260,7 @@ class PreferredCertificateAuthority(BASE, ModelBase):
         return {"project_id": self.project_id, "ca_id": self.ca_id}
 
 
-class SecretACL(BASE, ModelBase):
+class SecretACL(BASE, SoftDeleteMixIn, ModelBase):
     """Stores Access Control List (ACL) for a secret.
 
     Class to define whitelist of user ids who are allowed specific operation
@@ -1266,7 +1269,8 @@ class SecretACL(BASE, ModelBase):
     Creator_only flag helps in making a secret private for
     non-admin project users who may have access otherwise.
 
-    SecretACL deletes are not soft-deletes.
+    sapcc-custom: SecretACL now uses soft-delete so tombstones can be revived
+    during secret recovery (recover=true).
     """
 
     __tablename__ = "secret_acls"
@@ -1450,13 +1454,14 @@ class ContainerACL(BASE, ModelBase):
         return fields
 
 
-class SecretACLUser(BASE, ModelBase):
+class SecretACLUser(BASE, SoftDeleteMixIn, ModelBase):
     """Stores user id for a secret ACL.
 
     This class provides way to store list of users associated with a
     specific ACL operation.
 
-    SecretACLUser deletes are not soft-deletes.
+    sapcc-custom: SecretACLUser now uses soft-delete so tombstones can be
+    revived during secret recovery (recover=true).
     """
 
     __tablename__ = "secret_acl_users"
