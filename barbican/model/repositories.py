@@ -792,8 +792,14 @@ class SecretRepo(BaseRepo):
             query = self._build_sort_filter_query(query, sort)
 
         if acl_only and acl_only.lower() == 'true' and user_id:
-            query = query.join(models.SecretACL)
-            query = query.join(models.SecretACLUser)
+            query = query.join(
+                models.SecretACL,
+                (models.SecretACL.secret_id == models.Secret.id) &
+                (models.SecretACL.deleted == False))  # noqa: E712
+            query = query.join(
+                models.SecretACLUser,
+                (models.SecretACLUser.acl_id == models.SecretACL.id) &
+                (models.SecretACLUser.deleted == False))  # noqa: E712
             query = query.filter(models.SecretACLUser.user_id == user_id)
         else:
             query = query.join(models.Project)
@@ -2083,8 +2089,8 @@ class SecretACLRepo(BaseRepo):
     SecretACLUser (ACL user data) directly. Its always derived from
     SecretACL relationship.
 
-    SecretACL and SecretACLUser data is not soft delete. So there is no need
-    to have deleted=False filter in queries.
+    sapcc-custom: SecretACL now uses soft-delete (SoftDeleteMixIn) so all
+    queries must filter deleted=False to exclude tombstoned rows.
     """
 
     def _do_entity_name(self):
@@ -2094,7 +2100,7 @@ class SecretACLRepo(BaseRepo):
     def _do_build_get_query(self, entity_id, external_project_id, session):
         """Sub-class hook: build a retrieve query."""
         query = session.query(models.SecretACL)
-        query = query.filter_by(id=entity_id)
+        query = query.filter_by(id=entity_id, deleted=False)
         return query
 
     def _do_validate(self, values):
@@ -2107,7 +2113,7 @@ class SecretACLRepo(BaseRepo):
         session = self.get_session(session)
 
         query = session.query(models.SecretACL)
-        query = query.filter_by(secret_id=secret_id)
+        query = query.filter_by(secret_id=secret_id, deleted=False)
 
         return query.all()
 
@@ -2145,6 +2151,8 @@ class SecretACLRepo(BaseRepo):
         secret_acl.updated_at = now
 
         for acl_user in secret_acl.acl_users:
+            if acl_user.deleted:
+                continue
             if acl_user.user_id in user_ids:  # input user_id already exists
                 acl_user.updated_at = now
                 user_ids.remove(acl_user.user_id)
@@ -2161,7 +2169,8 @@ class SecretACLRepo(BaseRepo):
         """Gets count of existing secret ACL(s) for a given secret."""
         session = self.get_session(session)
         query = session.query(sa_func.count(models.SecretACL.id))
-        query = query.filter(models.SecretACL.secret_id == secret_id)
+        query = query.filter(models.SecretACL.secret_id == secret_id,
+                             models.SecretACL.deleted == False)  # noqa: E712
         return query.scalar()
 
     def delete_acls_for_secret(self, secret, session=None):

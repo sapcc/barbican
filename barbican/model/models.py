@@ -379,7 +379,11 @@ class Secret(BASE, SoftDeleteMixIn, ModelBase):
         cascade_backrefs=False,
     )
     secret_acls = orm.relationship(
-        "SecretACL", back_populates="secret", lazy=False
+        "SecretACL",
+        primaryjoin="and_(Secret.id == foreign(SecretACL.secret_id),"
+                    " SecretACL.deleted == False)",
+        back_populates="secret",
+        lazy=False,
     )
 
     def __init__(self, parsed_request=None, check_exc=True):
