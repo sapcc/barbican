@@ -19,23 +19,20 @@ Server startup application for barbican-keystone-listener
 """
 import sys
 
+from oslo_log import log
+from oslo_reports import guru_meditation_report as gmr
+from oslo_reports import opts as gmr_opts
+from oslo_service import service
+
 from barbican.common import config
 from barbican import queue
 from barbican.queue import keystone_listener
 from barbican import version
 
-from oslo_log import log
-from oslo_service.backend import BackendType
-from oslo_service.backend import init_backend
-from oslo_service import service
-
 
 def main():
     try:
         config.setup_remote_pydev_debug()
-
-        # Ensure oslo.service uses the threading backend early
-        init_backend(BackendType.THREADING)
 
         CONF = config.CONF
         CONF(sys.argv[1:], project='barbican',
@@ -43,9 +40,11 @@ def main():
 
         # Import and configure logging.
         log.setup(CONF, 'barbican')
-
         LOG = log.getLogger(__name__)
         LOG.info("Booting up Barbican Keystone listener node...")
+
+        gmr_opts.set_defaults(CONF)
+        gmr.TextGuruMeditation.setup_autorun(version)
 
         # Queuing initialization
         queue.init(CONF)

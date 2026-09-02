@@ -20,12 +20,11 @@ import builtins
 import collections
 import importlib
 import mimetypes
+import re
 import uuid
 
 from oslo_log import log
-from oslo_utils import uuidutils
 import pecan
-import re
 from urllib import parse
 
 from barbican.common import config
@@ -66,7 +65,7 @@ def allow_all_content_types(f):
 
 
 def get_base_url_from_request():
-    """Derive base url from wsgi request if CONF.host_href is not set
+    """Derive base url from wsgi request
 
     Use host.href as base URL if its set in barbican.conf.
     If its not set, then derives value from wsgi request. WSGI request uses
@@ -77,7 +76,10 @@ def get_base_url_from_request():
     Some of unit tests does not have pecan context that's why using request
     attr check on pecan instance.
     """
-    if not CONF.host_href and hasattr(pecan.request, 'application_url'):
+    if CONF.host_href:
+        return CONF.host_href
+
+    if getattr(pecan.request, 'application_url', None):
         p_url = parse.urlsplit(pecan.request.application_url)
         # Pecan does not handle X_FORWARDED_PROTO yet, so we need to
         # handle it ourselves. see lp#1445290
@@ -93,8 +95,8 @@ def get_base_url_from_request():
         else:
             base_url = '%s://%s' % (scheme, netloc)
         return base_url
-    else:  # when host_href is set or flow is not within wsgi request context
-        return CONF.host_href
+    else:
+        raise ValueError('host_href cannot be determined')
 
 
 def hostname_for_refs(resource=None):
@@ -193,10 +195,6 @@ def get_class_for(module_name, class_name):
     # Load and return the resolved Python class, raising AttributeError if
     # class cannot be found.
     return getattr(python_module, class_name)
-
-
-def generate_uuid():
-    return uuidutils.generate_uuid()
 
 
 def is_multiple_backends_enabled():
