@@ -34,14 +34,16 @@ GITREPO["python-barbicanclient"]=${BARBICANCLIENT_REPO:-${GIT_BASE}/openstack/py
 GITBRANCH["python-barbicanclient"]=${BARBICANCLIENT_BRANCH:-$TARGET_BRANCH}
 GITDIR["python-barbicanclient"]=$DEST/python-barbicanclient
 
-# Set host href
-BARBICAN_HOST_HREF=${BARBICAN_HOST_HREF:-$SERVICE_PROTOCOL://${SERVICE_HOST}/key-manager}
-
 GITREPO["barbican-tempest-plugin"]=${BARBICANTEMPEST_REPO:-${GIT_BASE}/openstack/barbican-tempest-plugin.git}
 GITBRANCH["barbican-tempest-plugin"]=${BARBICANTEMPEST_BRANCH:-master}
 GITDIR["barbican-tempest-plugin"]=$DEST/barbican-tempest-plugin
 
 # Secure RBAC
-BARBICAN_ENFORCE_SCOPE=$(trueorfalse True ENFORCE_SCOPE)
+BARBICAN_ENFORCE_NEW_DEFAULTS=$(trueorfalse True ENFORCE_NEW_DEFAULTS)
+
+# Vault plugin
+VAULT_PLUGIN_BACKEND=${VAULT_PLUGIN_BACKEND:-}
+VAULT_PLUGIN_HASHICORP_VAULT_VERSION=${VAULT_PLUGIN_HASHICORP_VAULT_VERSION:-1.13.2}
+VAULT_PLUGIN_OPENBAO_VERSION=${VAULT_PLUGIN_OPENBAO_VERSION:-2.3.2}
 
 enable_service barbican

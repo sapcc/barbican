@@ -19,8 +19,8 @@ if is_service_enabled barbican; then
             install_dogtag_components
         fi
         if is_service_enabled barbican-vault; then
-            echo_summary "Installing Vault"
-            install_vault
+            echo_summary "Installing Vault backend"
+            install_vault_backend
         fi
     elif [[ "$1" == "stack" && "$2" == "post-config" ]]; then
         echo_summary "Configuring Barbican"
@@ -44,7 +44,7 @@ if is_service_enabled barbican; then
         if is_service_enabled key; then
             create_barbican_accounts
             create_barbican_endpoints
-            if [[ "$BARBICAN_ENFORCE_SCOPE" == "False" ]]; then
+            if [[ "$BARBICAN_ENFORCE_NEW_DEFAULTS" == "False" ]]; then
                 create_deprecated_rbac_accounts
             fi
         fi
