@@ -150,8 +150,17 @@ class V1Controller(BaseVersionController):
     def index(self):
         pecan.abort(405)  # HTTP 405 Method Not Allowed as default
 
+    # SAPCC: relax the Accept-header whitelist on the version-listing
+    # endpoints so that stray requests carrying unusual `Accept` values
+    # (typically browser favicon probes surfacing here with
+    # `Accept: image/vnd.microsoft.icon`) do not cause pecan.core to log
+    # an error-level "Controller 'on_get' defined does not support
+    # content_type ..." message that then gets shipped to Sentry as an
+    # incident. These endpoints always render JSON (`template='json'`),
+    # so widening the content-type list does not change response bodies
+    # or introduce any auth/data risk.
     @index.when(method='GET', template='json')
-    @utils.allow_certain_content_types(MIME_TYPE_JSON, MIME_TYPE_JSON_HOME)
+    @utils.allow_all_content_types
     @controllers.handle_exceptions(u._('Version retrieval'))
     def on_get(self):
         pecan.core.override_template('json')
@@ -177,8 +186,11 @@ class VersionsController(object):
     def index(self, **kwargs):
         pecan.abort(405)  # HTTP 405 Method Not Allowed as default
 
+    # SAPCC: see the comment on V1Controller.on_get above — this is the
+    # same relaxation applied at the root ('/') version-listing endpoint,
+    # which is where the browser favicon probes actually land.
     @index.when(method='GET', template='json')
-    @utils.allow_certain_content_types(MIME_TYPE_JSON, MIME_TYPE_JSON_HOME)
+    @utils.allow_all_content_types
     def on_get(self, **kwargs):
         """The list of versions is dependent on the context."""
         self._redirect_to_default_json_home_if_needed(pecan.request)
