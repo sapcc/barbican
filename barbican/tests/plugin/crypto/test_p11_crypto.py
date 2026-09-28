@@ -255,11 +255,75 @@ class WhenTestingP11CryptoPlugin(utils.BaseTestCase):
         self.assertEqual(1, self.pkcs11.encrypt.call_count)
         self.assertEqual(1, self.pkcs11.return_session.call_count)
 
-    def test_generate_asymmetric_raises_error(self):
-        self.assertRaises(NotImplementedError,
+    def _make_asymmetric_generate_dto(self, algorithm='rsa', bit_length=2048,
+                                      passphrase=None):
+        return plugin_import.GenerateDTO(algorithm, bit_length, None,
+                                         passphrase)
+
+    def _make_kek_meta(self):
+        kek_meta = mock.MagicMock()
+        kek_meta.kek_label = 'pkek'
+        kek_meta.plugin_meta = ('{"iv": "iv==",'
+                                '"hmac": "hmac",'
+                                '"wrapped_key": "wrappedkey==",'
+                                '"mkek_label": "mkek_label",'
+                                '"hmac_label": "hmac_label"}')
+        return kek_meta
+
+    def test_generate_asymmetric_rsa(self):
+        generate_dto = self._make_asymmetric_generate_dto(
+            algorithm='rsa', bit_length=2048)
+        private_dto, public_dto, passphrase_dto = (
+            self.plugin.generate_asymmetric(generate_dto,
+                                            self._make_kek_meta(),
+                                            mock.MagicMock()))
+
+        # Each returned DTO uses the mocked HSM encrypt(); the wrapper
+        # returns b'0' as ciphertext for every call.
+        self.assertEqual(b'0', private_dto.cypher_text)
+        self.assertEqual(b'0', public_dto.cypher_text)
+        self.assertIsNone(passphrase_dto)
+        self.assertIn('iv', private_dto.kek_meta_extended)
+        self.assertIn('iv', public_dto.kek_meta_extended)
+
+        # HSM was called to encrypt exactly two blobs (private + public).
+        self.assertEqual(2, self.pkcs11.encrypt.call_count)
+        # Session was acquired and released exactly once for the whole
+        # asymmetric generation call, in addition to the KEK-load session.
+        self.assertEqual(2, self.pkcs11.get_session.call_count)
+        self.assertEqual(1, self.pkcs11.return_session.call_count)
+
+    def test_generate_asymmetric_rsa_with_passphrase(self):
+        generate_dto = self._make_asymmetric_generate_dto(
+            algorithm='rsa', bit_length=2048, passphrase='s3cret')
+        private_dto, public_dto, passphrase_dto = (
+            self.plugin.generate_asymmetric(generate_dto,
+                                            self._make_kek_meta(),
+                                            mock.MagicMock()))
+
+        self.assertIsNotNone(passphrase_dto)
+        self.assertEqual(b'0', passphrase_dto.cypher_text)
+        # Three encrypt calls: private, public, passphrase.
+        self.assertEqual(3, self.pkcs11.encrypt.call_count)
+
+    def test_generate_asymmetric_dsa(self):
+        generate_dto = self._make_asymmetric_generate_dto(
+            algorithm='dsa', bit_length=2048)
+        private_dto, public_dto, passphrase_dto = (
+            self.plugin.generate_asymmetric(generate_dto,
+                                            self._make_kek_meta(),
+                                            mock.MagicMock()))
+        self.assertEqual(b'0', private_dto.cypher_text)
+        self.assertEqual(b'0', public_dto.cypher_text)
+        self.assertIsNone(passphrase_dto)
+
+    def test_generate_asymmetric_unsupported_algorithm(self):
+        generate_dto = self._make_asymmetric_generate_dto(
+            algorithm='ec', bit_length=256)
+        self.assertRaises(plugin_import.CryptoPrivateKeyFailureException,
                           self.plugin.generate_asymmetric,
-                          mock.MagicMock(),
-                          mock.MagicMock(),
+                          generate_dto,
+                          self._make_kek_meta(),
                           mock.MagicMock())
 
     def test_supports_encrypt_decrypt(self):
@@ -276,10 +340,39 @@ class WhenTestingP11CryptoPlugin(utils.BaseTestCase):
             )
         )
 
-    def test_does_not_supports_asymmetric_key_generation(self):
-        self.assertFalse(
+    def test_supports_asymmetric_key_generation(self):
+        # No algorithm/bit-length hint -> True.
+        self.assertTrue(
             self.plugin.supports(
                 plugin_import.PluginSupportTypes.ASYMMETRIC_KEY_GENERATION
+            )
+        )
+        # Known RSA at supported bit-length -> True.
+        self.assertTrue(
+            self.plugin.supports(
+                plugin_import.PluginSupportTypes.ASYMMETRIC_KEY_GENERATION,
+                algorithm='rsa', bit_length=2048,
+            )
+        )
+        # Known DSA at supported bit-length -> True.
+        self.assertTrue(
+            self.plugin.supports(
+                plugin_import.PluginSupportTypes.ASYMMETRIC_KEY_GENERATION,
+                algorithm='dsa', bit_length=2048,
+            )
+        )
+        # Unknown algorithm -> False.
+        self.assertFalse(
+            self.plugin.supports(
+                plugin_import.PluginSupportTypes.ASYMMETRIC_KEY_GENERATION,
+                algorithm='ec', bit_length=256,
+            )
+        )
+        # Unsupported bit-length -> False.
+        self.assertFalse(
+            self.plugin.supports(
+                plugin_import.PluginSupportTypes.ASYMMETRIC_KEY_GENERATION,
+                algorithm='rsa', bit_length=999,
             )
         )
 
