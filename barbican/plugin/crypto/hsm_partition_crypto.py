@@ -25,6 +25,24 @@ from barbican.plugin.crypto import p11_crypto
 LOG = utils.getLogger(__name__)
 CONF = config.new_config()
 
+# Register the appliance list
+hsm_appliances_group = cfg.OptGroup(
+    name="hsm_appliances",
+    title="HSM Appliance List",
+)
+hsm_appliances_opts = [
+    cfg.ListOpt(
+        "appliances",
+        default=[],
+        help=u._(
+            "List of HSM appliance suffixes. Each name here must have a "
+            "matching [hsm_partition_crypto_plugin:<name>] section that "
+            "carries its plugin_name (used as the routing identity) and "
+            "vendor library configuration."
+        ),
+    ),
+]
+
 # Register hsm partition plugin options
 hsm_partition_crypto_plugin_group = cfg.OptGroup(
     name="hsm_partition_crypto_plugin",
@@ -138,34 +156,40 @@ hsm_partition_crypto_plugin_opts = [
 ]
 
 
-# Register Vendor-specific sections
+# Register vendor/appliance-specific sections
 def register_opts_for_hsm_vendors(conf):
-    # Define vendor HSMs that you want to support
-    vendors = ["thales_hsm", "utimaco_hsm"]
+    """Register a config section per configured appliance.
 
-    for vendor in vendors:
+    Reads [hsm_appliances] appliances from `conf` and registers a
+    [hsm_partition_crypto_plugin:<name>] group for each.
+    """
+    appliances = conf.hsm_appliances.appliances
+
+    for appliance in appliances:
         # Construct the section name
-        section_name = f"hsm_partition_crypto_plugin:{vendor}"
+        section_name = f"hsm_partition_crypto_plugin:{appliance}"
 
-        # Create a new option group for the vendor
-        vendor_group = cfg.OptGroup(
+        # Create a new option group for the appliance
+        appliance_group = cfg.OptGroup(
             name=section_name,
-            title=f"HSM Partition Crypto Plugin Options for {vendor}",
+            title=f"HSM Partition Crypto Plugin Options for {appliance}",
         )
 
         # Register the group and options
-        conf.register_group(vendor_group)
+        conf.register_group(appliance_group)
         conf.register_opts(
-            hsm_partition_crypto_plugin_opts, group=vendor_group
+            hsm_partition_crypto_plugin_opts, group=appliance_group
         )
 
         LOG.debug(
-            f"Registered HSM vendor configuration section: {section_name}"
+            f"Registered HSM appliance configuration section: {section_name}"
         )
 
 
-# Register all vendor sections
-register_opts_for_hsm_vendors(CONF)
+# Register [hsm_appliances] first, then parse args so the appliance list is
+# readable, then register a section per listed appliance.
+CONF.register_group(hsm_appliances_group)
+CONF.register_opts(hsm_appliances_opts, group=hsm_appliances_group)
 
 CONF.register_group(hsm_partition_crypto_plugin_group)
 CONF.register_opts(
@@ -173,8 +197,12 @@ CONF.register_opts(
 )
 config.parse_args(CONF)
 
+# Now that CONF is parsed, iterate the appliance list.
+register_opts_for_hsm_vendors(CONF)
+
 
 def list_opts():
+    yield hsm_appliances_group, hsm_appliances_opts
     yield hsm_partition_crypto_plugin_group, hsm_partition_crypto_plugin_opts
 
 
@@ -378,31 +406,3 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         return super(HSMPartitionCryptoPlugin, self).generate_symmetric(
             generate_dto, kek_meta_dto, project_id
         )
-
-
-class UtimacoHSMPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
-    """Utimaco HSM Partition Crypto Plugin.
-
-    This is a specialized version of HSMPartitionCryptoPlugin configured
-    for Utimaco HSMs. It uses the hsm_partition_crypto_plugin:utimaco_hsm
-    configuration section.
-    """
-
-    def __init__(self, *args, **kwargs):
-        """Initialize with the utimaco_hsm store plugin name."""
-        kwargs["store_plugin_name"] = "utimaco_hsm"
-        super(UtimacoHSMPartitionCryptoPlugin, self).__init__(*args, **kwargs)
-
-
-class ThalesHSMPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
-    """Thales HSM Partition Crypto Plugin.
-
-    This is a specialized version of HSMPartitionCryptoPlugin configured
-    for Thales HSMs. It uses the hsm_partition_crypto_plugin:thales_hsm
-    configuration section.
-    """
-
-    def __init__(self, *args, **kwargs):
-        """Initialize with the utimaco_hsm store plugin name."""
-        kwargs["store_plugin_name"] = "thales_hsm"
-        super(ThalesHSMPartitionCryptoPlugin, self).__init__(*args, **kwargs)
