@@ -11,7 +11,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from importlib import metadata as importlib_metadata
+
 from oslo_config import cfg
+from stevedore import extension as stevedore_extension
 from stevedore import named
 import threading
 
@@ -19,8 +22,12 @@ from barbican.common import config
 from barbican.common import utils
 from barbican import i18n as u
 from barbican.plugin.crypto import base
+from barbican.plugin.crypto import hsm_partition_crypto
 from barbican.plugin.util import multiple_backends
 from barbican.plugin.util import utils as plugin_utils
+
+
+LOG = utils.getLogger(__name__)
 
 
 _PLUGIN_MANAGER = None
@@ -54,6 +61,19 @@ def list_opts():
     yield crypto_opt_group, crypto_opts
 
 
+def get_plugin_name(plugin):
+    """Return the routing identity for a crypto plugin.
+
+    HSMPartitionCryptoPlugin instances share a Python class path, so
+    generate_fullname_for() cannot distinguish per-appliance instances.
+    For those, use the configured plugin_name from their config section.
+    All other plugins keep the historical class-path identity.
+    """
+    if isinstance(plugin, hsm_partition_crypto.HSMPartitionCryptoPlugin):
+        return plugin.get_plugin_name()
+    return utils.generate_fullname_for(plugin)
+
+
 class _CryptoPluginManager(named.NamedExtensionManager):
     def __init__(self, conf=CONF, invoke_args=(), invoke_kwargs={}):
         """Crypto Plugin Manager
@@ -77,6 +97,53 @@ class _CryptoPluginManager(named.NamedExtensionManager):
 
         plugin_utils.instantiate_plugins(
             self, invoke_args, invoke_kwargs)
+
+        # Also instantiate one HSMPartitionCryptoPlugin per configured
+        # appliance suffix.
+        self._instantiate_appliance_plugins(invoke_args, invoke_kwargs)
+
+    def _instantiate_appliance_plugins(self, invoke_args, invoke_kwargs):
+        appliances = hsm_partition_crypto.CONF.hsm_appliances.appliances
+        seen_names = set()
+
+        for appliance in appliances:
+            try:
+                plugin_inst = hsm_partition_crypto.HSMPartitionCryptoPlugin(
+                    *invoke_args,
+                    store_plugin_name=appliance,
+                    **invoke_kwargs,
+                )
+            except Exception:
+                LOG.exception(
+                    "Failed to instantiate HSMPartitionCryptoPlugin for "
+                    "appliance '%s'", appliance)
+                continue
+
+            configured_name = plugin_inst.get_plugin_name()
+            if configured_name in seen_names:
+                raise base.CryptoPluginUnsupportedOperation(
+                    operation=(
+                        "duplicate plugin_name '%s' across HSM appliance "
+                        "sections — each appliance must have a unique "
+                        "plugin_name" % configured_name
+                    )
+                )
+            seen_names.add(configured_name)
+
+            ext = stevedore_extension.Extension(
+                name=configured_name,
+                entry_point=importlib_metadata.EntryPoint(
+                    name=configured_name,
+                    value=(
+                        "barbican.plugin.crypto.hsm_partition_crypto:"
+                        "HSMPartitionCryptoPlugin"
+                    ),
+                    group=DEFAULT_PLUGIN_NAMESPACE,
+                ),
+                plugin=type(plugin_inst),
+                obj=plugin_inst,
+            )
+            self.extensions.append(ext)
 
     def get_plugin_store_generate(self, type_needed, algorithm=None,
                                   bit_length=None, mode=None, project_id=None):
@@ -121,7 +188,7 @@ class _CryptoPluginManager(named.NamedExtensionManager):
             raise base.CryptoPluginNotFound()
 
         for decrypting_plugin in active_plugins:
-            plugin_name = utils.generate_fullname_for(decrypting_plugin)
+            plugin_name = get_plugin_name(decrypting_plugin)
             if plugin_name == plugin_name_for_store:
                 break
         else:
