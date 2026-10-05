@@ -103,6 +103,9 @@ class _CryptoPluginManager(named.NamedExtensionManager):
 
     def _instantiate_appliance_plugins(self, invoke_args, invoke_kwargs):
         appliances = hsm_partition_crypto.CONF.hsm_appliances.appliances
+        LOG.info(
+            "Instantiating HSM appliance plugins for: %s",
+            appliances or "(none configured)")
         seen_names = set()
 
         for appliance in appliances:
@@ -140,7 +143,24 @@ class _CryptoPluginManager(named.NamedExtensionManager):
                 plugin=type(plugin_inst),
                 obj=plugin_inst,
             )
-            self.extensions.append(ext)
+
+            # Replace any stevedore stub with the same name (obj=None) that
+            # was added by the named extension load but couldn't resolve to
+            # an entry point. The dynamically-created instance must win.
+            for i, existing in enumerate(self.extensions):
+                if existing.name == configured_name:
+                    LOG.debug(
+                        "Replacing stevedore stub for '%s' with live "
+                        "HSMPartitionCryptoPlugin instance", configured_name)
+                    self.extensions[i] = ext
+                    break
+            else:
+                self.extensions.append(ext)
+
+            LOG.info(
+                "Registered HSM appliance plugin '%s' (section: "
+                "hsm_partition_crypto_plugin:%s)",
+                configured_name, appliance)
 
     def get_plugin_store_generate(self, type_needed, algorithm=None,
                                   bit_length=None, mode=None, project_id=None):
