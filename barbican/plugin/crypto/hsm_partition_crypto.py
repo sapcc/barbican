@@ -248,7 +248,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         try:
             self.conf = conf[self.section_name]
             LOG.info(f"Using HSM configuration section: {self.section_name}")
-        except cfg.NoSuchOptError:
+        except (cfg.NoSuchGroupError, cfg.NoSuchOptError):
             # Section doesn't exist - create a new one dynamically
             LOG.warning(
                 f"No config found for {self.section_name}, "
@@ -408,4 +408,30 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         self._configure_pkcs11(project_id)
         return super(HSMPartitionCryptoPlugin, self).generate_symmetric(
             generate_dto, kek_meta_dto, project_id
+        )
+
+
+class UtimacoHSMPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
+    """Backwards-compatible wrapper for the utimaco_hsm_crypto entry point.
+
+    Reads config from [hsm_partition_crypto_plugin:utimaco_hsm].
+    """
+
+    def __init__(self, conf=None, ffi=None, pkcs11=None):
+        super().__init__(
+            conf=conf, ffi=ffi, pkcs11=pkcs11,
+            store_plugin_name="utimaco_hsm",
+        )
+
+
+class ThalesHSMPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
+    """Backwards-compatible wrapper for the thales_hsm_crypto entry point.
+
+    Reads config from [hsm_partition_crypto_plugin:thales_hsm].
+    """
+
+    def __init__(self, conf=None, ffi=None, pkcs11=None):
+        super().__init__(
+            conf=conf, ffi=ffi, pkcs11=pkcs11,
+            store_plugin_name="thales_hsm",
         )
