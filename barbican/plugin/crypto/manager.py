@@ -7,9 +7,8 @@
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-# implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# implied.  See the License for the specific language governing
+# permissions and limitations under the License.
 
 from importlib import metadata as importlib_metadata
 
@@ -121,12 +120,10 @@ class _CryptoPluginManager(named.NamedExtensionManager):
 
             configured_name = plugin_inst.get_plugin_name()
             if configured_name in seen_names:
-                raise base.CryptoPluginUnsupportedOperation(
-                    operation=(
-                        "duplicate plugin_name '%s' across HSM appliance "
-                        "sections — each appliance must have a unique "
-                        "plugin_name" % configured_name
-                    )
+                raise ValueError(
+                    "duplicate plugin_name '%s' across HSM appliance "
+                    "sections — each appliance must have a unique "
+                    "plugin_name" % configured_name
                 )
             seen_names.add(configured_name)
 

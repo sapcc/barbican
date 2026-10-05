@@ -203,6 +203,9 @@ register_opts_for_hsm_vendors(CONF)
 
 def list_opts():
     yield hsm_appliances_group, hsm_appliances_opts
+    # Per-appliance [hsm_partition_crypto_plugin:<name>] sections use the
+    # same options as below; they are registered at parse-time from the
+    # appliances list and cannot be enumerated statically here.
     yield hsm_partition_crypto_plugin_group, hsm_partition_crypto_plugin_opts
 
 
