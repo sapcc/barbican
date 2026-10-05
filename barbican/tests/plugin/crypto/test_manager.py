@@ -7,9 +7,8 @@
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-# implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# implied.  See the License for the specific language governing
+# permissions and limitations under the License.
 
 import threading
 from unittest import mock
@@ -170,22 +169,25 @@ class WhenTestingApplianceInstantiation(utils.BaseTestCase):
             manager.extensions = original_extensions
 
     def test_duplicate_plugin_name_raises(self):
-        # Two configured appliances with the same plugin_name must fail
-        # instantiation. Simulate by seeding two extensions with matching
-        # identities and calling the dedup logic directly.
-        manager = cm.get_manager()
+        fake_a = self._fake_plugin("shared_name")
+        fake_b = self._fake_plugin("shared_name")
 
-        fake_a = mock.MagicMock(
-            spec=hsm_partition_crypto.HSMPartitionCryptoPlugin)
-        fake_a.get_plugin_name.return_value = "shared_name"
-        fake_b = mock.MagicMock(
-            spec=hsm_partition_crypto.HSMPartitionCryptoPlugin)
-        fake_b.get_plugin_name.return_value = "shared_name"
-
-        # Simulate the dedup guard used inside _instantiate_appliance_plugins.
-        seen = set()
-        seen.add(fake_a.get_plugin_name())
-        duplicate = fake_b.get_plugin_name() in seen
-        self.assertTrue(duplicate)
-        # Ensure manager is left in a clean state.
-        self.assertIsNotNone(manager)
+        mgr = cm.get_manager()
+        original_extensions = list(mgr.extensions)
+        try:
+            with mock.patch(
+                "barbican.plugin.crypto.hsm_partition_crypto.CONF"
+            ) as mock_conf, mock.patch(
+                "barbican.plugin.crypto.hsm_partition_crypto"
+                ".HSMPartitionCryptoPlugin",
+                side_effect=[fake_a, fake_b],
+            ):
+                mock_conf.hsm_appliances.appliances = [
+                    "appliance_a", "appliance_b"]
+                self.assertRaises(
+                    ValueError,
+                    mgr._instantiate_appliance_plugins,
+                    (), {},
+                )
+        finally:
+            mgr.extensions = original_extensions
