@@ -63,7 +63,7 @@ def create_hsm_partition(args):
     if existing_config:
         LOG.info(
             "HSM partition config already exists for project %s",
-            project.external_project_id,
+            project.external_id,
         )
         return existing_config
 
