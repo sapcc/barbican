@@ -127,27 +127,48 @@ class WhenTestingPluginName(utils.BaseTestCase):
     def test_hsm_partition_plugin_uses_configured_name(self):
         plugin = mock.MagicMock(
             spec=hsm_partition_crypto.HSMPartitionCryptoPlugin)
+        plugin.conf = mock.MagicMock(legacy_plugin_name=None)
         plugin.get_plugin_name.return_value = "utimaco_hsm_42"
 
         self.assertEqual("utimaco_hsm_42", cm.get_plugin_name(plugin))
 
+    def test_hsm_partition_plugin_prefers_legacy_name(self):
+        plugin = mock.MagicMock(
+            spec=hsm_partition_crypto.HSMPartitionCryptoPlugin)
+        plugin.conf = mock.MagicMock(
+            legacy_plugin_name=(
+                "barbican.plugin.crypto.hsm_partition_crypto."
+                "UtimacoHSMPartitionCryptoPlugin"
+            )
+        )
+        plugin.get_plugin_name.return_value = "utimaco_hsm_1"
+
+        self.assertEqual(
+            "barbican.plugin.crypto.hsm_partition_crypto."
+            "UtimacoHSMPartitionCryptoPlugin",
+            cm.get_plugin_name(plugin),
+        )
+
     def test_two_hsm_instances_have_distinct_identity(self):
         a = mock.MagicMock(
             spec=hsm_partition_crypto.HSMPartitionCryptoPlugin)
+        a.conf = mock.MagicMock(legacy_plugin_name=None)
         a.get_plugin_name.return_value = "utimaco_hsm"
         b = mock.MagicMock(
             spec=hsm_partition_crypto.HSMPartitionCryptoPlugin)
+        b.conf = mock.MagicMock(legacy_plugin_name=None)
         b.get_plugin_name.return_value = "utimaco_hsm_2"
 
         self.assertNotEqual(cm.get_plugin_name(a), cm.get_plugin_name(b))
 
 
 class WhenTestingApplianceInstantiation(utils.BaseTestCase):
-    """Manager instantiates one HSMPartitionCryptoPlugin per appliance."""
+    """Manager instantiates one HSMPartitionCryptoPlugin per plugin_names."""
 
     def _fake_plugin(self, plugin_name):
         inst = mock.MagicMock(
             spec=hsm_partition_crypto.HSMPartitionCryptoPlugin)
+        inst.conf = mock.MagicMock(legacy_plugin_name=None)
         inst.get_plugin_name.return_value = plugin_name
         return inst
 
@@ -168,9 +189,9 @@ class WhenTestingApplianceInstantiation(utils.BaseTestCase):
         finally:
             manager.extensions = original_extensions
 
-    def test_duplicate_plugin_name_raises(self):
-        fake_a = self._fake_plugin("shared_name")
-        fake_b = self._fake_plugin("shared_name")
+    def test_duplicate_appliance_name_raises(self):
+        fake_a = self._fake_plugin("ignored_1")
+        fake_b = self._fake_plugin("ignored_2")
 
         mgr = cm.get_manager()
         original_extensions = list(mgr.extensions)
@@ -182,11 +203,11 @@ class WhenTestingApplianceInstantiation(utils.BaseTestCase):
                 ".HSMPartitionCryptoPlugin",
                 side_effect=[fake_a, fake_b],
             ):
-                mock_conf.hsm_appliances.appliances = [
-                    "appliance_a", "appliance_b"]
+                mock_conf.hsm_partition_crypto_plugins.plugin_names = [
+                    "shared_appliance", "shared_appliance"]
                 self.assertRaises(
                     ValueError,
-                    mgr._instantiate_appliance_plugins,
+                    mgr._instantiate_hsm_partition_plugins,
                     (), {},
                 )
         finally:
