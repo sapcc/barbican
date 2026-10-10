@@ -25,20 +25,23 @@ from barbican.plugin.crypto import p11_crypto
 LOG = utils.getLogger(__name__)
 CONF = config.new_config()
 
-# Register the appliance list
-hsm_appliances_group = cfg.OptGroup(
-    name="hsm_appliances",
-    title="HSM Appliance List",
+# Register the HSM partition crypto plugin instance list.
+hsm_partition_crypto_plugins_group = cfg.OptGroup(
+    name="hsm_partition_crypto_plugins",
+    title="HSM Partition Crypto Plugin Instances",
 )
-hsm_appliances_opts = [
+hsm_partition_crypto_plugins_opts = [
     cfg.ListOpt(
-        "appliances",
+        "plugin_names",
         default=[],
         help=u._(
-            "List of HSM appliance suffixes. Each name here must have a "
-            "matching [hsm_partition_crypto_plugin:<name>] section that "
-            "carries its plugin_name (used as the routing identity) and "
-            "vendor library configuration."
+            "List of HSM partition crypto plugin instance names. Each "
+            "name here must have a matching "
+            "[hsm_partition_crypto_plugin:<name>] section carrying its "
+            "plugin_name (used as the routing identity) and vendor "
+            "library configuration. Each entry becomes one "
+            "HSMPartitionCryptoPlugin instance; distinct entries do not "
+            "need to map to distinct physical HSMs."
         ),
     ),
 ]
@@ -57,6 +60,18 @@ hsm_partition_crypto_plugin_opts = [
         "plugin_name",
         help=u._("User friendly plugin name"),
         default="HSM Partition Crypto Plugin",
+    ),
+    cfg.StrOpt(
+        "legacy_plugin_name",
+        default=None,
+        help=u._(
+            "Routing identity written to kek_data.plugin_name for this "
+            "plugin instance. Set only when inheriting data from a "
+            "pre-rename deployment that stored a different identifier "
+            "(typically the Python class path of the pre-rename plugin "
+            "subclass). Leave unset for new plugin instances; the "
+            "configured plugin_name is used instead."
+        ),
     ),
     cfg.StrOpt(
         "default_partition_id",
@@ -156,40 +171,44 @@ hsm_partition_crypto_plugin_opts = [
 ]
 
 
-# Register vendor/appliance-specific sections
-def register_opts_for_hsm_vendors(conf):
-    """Register a config section per configured appliance.
+# Register per-instance config sections
+def register_opts_for_hsm_plugin_instances(conf):
+    """Register a config section per configured plugin instance.
 
-    Reads [hsm_appliances] appliances from `conf` and registers a
-    [hsm_partition_crypto_plugin:<name>] group for each.
+    Reads [hsm_partition_crypto_plugins] plugin_names from `conf` and
+    registers a [hsm_partition_crypto_plugin:<name>] group for each.
     """
-    appliances = conf.hsm_appliances.appliances
+    plugin_names = conf.hsm_partition_crypto_plugins.plugin_names
 
-    for appliance in appliances:
+    for name in plugin_names:
         # Construct the section name
-        section_name = f"hsm_partition_crypto_plugin:{appliance}"
+        section_name = f"hsm_partition_crypto_plugin:{name}"
 
-        # Create a new option group for the appliance
-        appliance_group = cfg.OptGroup(
+        # Create a new option group for this plugin instance
+        instance_group = cfg.OptGroup(
             name=section_name,
-            title=f"HSM Partition Crypto Plugin Options for {appliance}",
+            title=f"HSM Partition Crypto Plugin Options for {name}",
         )
 
         # Register the group and options
-        conf.register_group(appliance_group)
+        conf.register_group(instance_group)
         conf.register_opts(
-            hsm_partition_crypto_plugin_opts, group=appliance_group
+            hsm_partition_crypto_plugin_opts, group=instance_group
         )
 
         LOG.debug(
-            f"Registered HSM appliance configuration section: {section_name}"
+            f"Registered HSM plugin instance configuration section: "
+            f"{section_name}"
         )
 
 
-# Register [hsm_appliances] first, then parse args so the appliance list is
-# readable, then register a section per listed appliance.
-CONF.register_group(hsm_appliances_group)
-CONF.register_opts(hsm_appliances_opts, group=hsm_appliances_group)
+# Register [hsm_partition_crypto_plugins] first, then parse args so the
+# plugin_names list is readable, then register a section per listed name.
+CONF.register_group(hsm_partition_crypto_plugins_group)
+CONF.register_opts(
+    hsm_partition_crypto_plugins_opts,
+    group=hsm_partition_crypto_plugins_group,
+)
 
 CONF.register_group(hsm_partition_crypto_plugin_group)
 CONF.register_opts(
@@ -197,15 +216,16 @@ CONF.register_opts(
 )
 config.parse_args(CONF)
 
-# Now that CONF is parsed, iterate the appliance list.
-register_opts_for_hsm_vendors(CONF)
+# Now that CONF is parsed, iterate the plugin instance list.
+register_opts_for_hsm_plugin_instances(CONF)
 
 
 def list_opts():
-    yield hsm_appliances_group, hsm_appliances_opts
-    # Per-appliance [hsm_partition_crypto_plugin:<name>] sections use the
+    yield hsm_partition_crypto_plugins_group, \
+        hsm_partition_crypto_plugins_opts
+    # Per-instance [hsm_partition_crypto_plugin:<name>] sections use the
     # same options as below; they are registered at parse-time from the
-    # appliances list and cannot be enumerated statically here.
+    # plugin_names list and cannot be enumerated statically here.
     yield hsm_partition_crypto_plugin_group, hsm_partition_crypto_plugin_opts
 
 
@@ -408,30 +428,4 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         self._configure_pkcs11(project_id)
         return super(HSMPartitionCryptoPlugin, self).generate_symmetric(
             generate_dto, kek_meta_dto, project_id
-        )
-
-
-class UtimacoHSMPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
-    """Backwards-compatible wrapper for the utimaco_hsm_crypto entry point.
-
-    Reads config from [hsm_partition_crypto_plugin:utimaco_hsm].
-    """
-
-    def __init__(self, conf=None, ffi=None, pkcs11=None):
-        super().__init__(
-            conf=conf, ffi=ffi, pkcs11=pkcs11,
-            store_plugin_name="utimaco_hsm",
-        )
-
-
-class ThalesHSMPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
-    """Backwards-compatible wrapper for the thales_hsm_crypto entry point.
-
-    Reads config from [hsm_partition_crypto_plugin:thales_hsm].
-    """
-
-    def __init__(self, conf=None, ffi=None, pkcs11=None):
-        super().__init__(
-            conf=conf, ffi=ffi, pkcs11=pkcs11,
-            store_plugin_name="thales_hsm",
         )
