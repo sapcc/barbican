@@ -402,16 +402,18 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
 
 
 class WhenTestingVendorPluginConfigurationIsolation(utils.BaseTestCase):
-    """Test that vendor plugins use isolated configurations."""
+    """Test that appliance plugin instances use isolated configurations."""
 
     def setUp(self):
         super(WhenTestingVendorPluginConfigurationIsolation, self).setUp()
         self.conf = config.new_config()
 
     def test_vendor_plugins_use_different_sections(self):
-        """Test that vendor plugins use different configuration sections."""
-        utimaco_plugin = hsm_partition_crypto.UtimacoHSMPartitionCryptoPlugin()
-        thales_plugin = hsm_partition_crypto.ThalesHSMPartitionCryptoPlugin()
+        """Each store_plugin_name maps to its own config section."""
+        utimaco_plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(
+            store_plugin_name="utimaco_hsm")
+        thales_plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(
+            store_plugin_name="thales_hsm")
 
         self.assertEqual("hsm_partition_crypto_plugin:utimaco_hsm",
                          utimaco_plugin.section_name)
@@ -421,8 +423,8 @@ class WhenTestingVendorPluginConfigurationIsolation(utils.BaseTestCase):
                             thales_plugin.section_name)
 
     def test_vendor_plugins_configuration_isolation(self):
-        """Test that vendor plugins read from isolated config sections."""
-        # Register both vendor-specific configuration sections
+        """Instances read plugin_name and other opts from their own section."""
+        # Register both appliance-specific configuration sections
         utimaco_section = "hsm_partition_crypto_plugin:utimaco_hsm"
         thales_section = "hsm_partition_crypto_plugin:thales_hsm"
 
@@ -439,7 +441,7 @@ class WhenTestingVendorPluginConfigurationIsolation(utils.BaseTestCase):
             hsm_partition_crypto.hsm_partition_crypto_plugin_opts,
             group=thales_group)
 
-        # Set different configurations for each vendor
+        # Set different configurations for each appliance
         self.conf[utimaco_section].plugin_name = "Utimaco Plugin"
         self.conf[
             utimaco_section].default_partition_id = "utimaco_partition_123"
@@ -448,10 +450,10 @@ class WhenTestingVendorPluginConfigurationIsolation(utils.BaseTestCase):
         self.conf[thales_section].default_partition_id = "thales_partition_456"
 
         # Create plugins and verify they read from their respective sections
-        utimaco_plugin = hsm_partition_crypto.UtimacoHSMPartitionCryptoPlugin(
-            conf=self.conf)
-        thales_plugin = hsm_partition_crypto.ThalesHSMPartitionCryptoPlugin(
-            conf=self.conf)
+        utimaco_plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(
+            conf=self.conf, store_plugin_name="utimaco_hsm")
+        thales_plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(
+            conf=self.conf, store_plugin_name="thales_hsm")
 
         self.assertEqual("Utimaco Plugin", utimaco_plugin.get_plugin_name())
         self.assertEqual("Thales Plugin", thales_plugin.get_plugin_name())
