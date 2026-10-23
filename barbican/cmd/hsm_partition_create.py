@@ -81,6 +81,11 @@ def create_hsm_partition(args):
     hsm_partition_config_obj.status = models.States.ACTIVE
     hsm_partition_config_obj.deleted = False
 
+    if getattr(args, 'device_ip', None):
+        hsm_partition_config_obj.partition_metadata = {
+            "device_ip": args.device_ip
+        }
+
     try:
         hsm_partition_config = hsm_partition_config_repo.create_from(
             hsm_partition_config_obj
