@@ -461,6 +461,12 @@ class SAPCommands(object):
         help="Override partition UUID",
     )
     @args(
+        "--device-ip",
+        dest="device_ip",
+        metavar="<device-ip>",
+        help="IP address of the Utimaco HSM device",
+    )
+    @args(
         "--debug",
         dest="debug",
         action="store_true",
@@ -476,6 +482,7 @@ class SAPCommands(object):
         slot_id=None,
         password=None,
         partition_id=None,
+        device_ip=None,
         debug=False,
     ):
         parsed_args = argparse.Namespace(
@@ -485,6 +492,7 @@ class SAPCommands(object):
             password=password,
             partition_id=partition_id,
             partition_label=partition_label,
+            device_ip=device_ip,
             debug=debug,
         )
         create_hsm_partition(parsed_args)

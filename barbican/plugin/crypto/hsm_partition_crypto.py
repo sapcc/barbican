@@ -13,6 +13,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import os
+import tempfile
+
 from oslo_config import cfg
 
 from barbican.common import config
@@ -306,6 +309,28 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
             )
         )
 
+    def _generate_utimaco_cfg(self, slot_id, device_ip):
+        """Generate an Utimaco PKCS#11 cfg file and return its path."""
+        port = slot_id + 4000
+        cfg_content = (
+            "[Global]\n"
+            "Logpath = /tmp\n"
+            "Logging = 4\n"
+            "SlotMultiSession = true\n"
+            "SlotCount = 10\n"
+            "\n"
+            "[HSMCluster]\n"
+            f"Devices = {port}@{device_ip}\n"
+        )
+        cfg_dir = os.path.join(tempfile.gettempdir(), "utimaco")
+        os.makedirs(cfg_dir, exist_ok=True)
+        cfg_path = os.path.join(
+            cfg_dir, f"cs_pkcs11_R3_{device_ip}_{port}.cfg"
+        )
+        with open(cfg_path, "w") as f:
+            f.write(cfg_content)
+        return cfg_path
+
     def _configure_pkcs11(self, project_id):
         """Configure PKCS11 for the specified project if needed."""
 
@@ -326,6 +351,11 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         self.token_labels = (
             [partition.token_label] if partition.token_label else None
         )
+
+        device_ip = (partition.partition_metadata or {}).get("device_ip")
+        if device_ip:
+            cfg_path = self._generate_utimaco_cfg(self.slot_id, device_ip)
+            os.environ["CS_PKCS11_R3_CFG"] = cfg_path
 
         # Create new PKCS11 instance
         self.pkcs11 = self._create_pkcs11(None)

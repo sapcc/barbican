@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import os
 import threading
 from unittest import mock
 
@@ -399,6 +400,88 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
             mock.MagicMock(),
             self.project_id,
         )
+
+
+    def test_configure_pkcs11_with_device_ip(self):
+        plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
+        plugin._get_partition_for_project = mock.MagicMock()
+        plugin._get_partition_for_project.return_value = HSMPartitionConfig(
+            project_id=self.project_id,
+            slot_id="0",
+            token_label=self.token_label,
+            credentials={
+                "library_path": self.library_path,
+                "password": self.login
+            },
+            partition_metadata={"device_ip": "10.246.244.60"},
+        )
+        plugin._create_pkcs11 = mock.MagicMock()
+        plugin._create_pkcs11.return_value = self.pkcs11
+
+        plugin._configure_pkcs11(self.project_id)
+
+        self.assertEqual(
+            os.environ.get("CS_PKCS11_R3_CFG"),
+            os.path.join(
+                os.path.dirname(os.environ["CS_PKCS11_R3_CFG"]),
+                "cs_pkcs11_R3_10.246.244.60_4000.cfg",
+            ),
+        )
+        with open(os.environ["CS_PKCS11_R3_CFG"]) as f:
+            content = f.read()
+        self.assertIn("Devices = 4000@10.246.244.60", content)
+
+    def test_configure_pkcs11_without_device_ip(self):
+        plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
+        plugin._get_partition_for_project = mock.MagicMock()
+        plugin._get_partition_for_project.return_value = HSMPartitionConfig(
+            project_id=self.project_id,
+            slot_id=self.slot_id,
+            token_label=self.token_label,
+            credentials={
+                "library_path": self.library_path,
+                "password": self.login
+            },
+            partition_metadata=None,
+        )
+        plugin._create_pkcs11 = mock.MagicMock()
+        plugin._create_pkcs11.return_value = self.pkcs11
+
+        original_env = os.environ.get("CS_PKCS11_R3_CFG")
+        plugin._configure_pkcs11(self.project_id)
+        self.assertEqual(original_env, os.environ.get("CS_PKCS11_R3_CFG"))
+
+    def test_configure_pkcs11_with_empty_metadata(self):
+        plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
+        plugin._get_partition_for_project = mock.MagicMock()
+        plugin._get_partition_for_project.return_value = HSMPartitionConfig(
+            project_id=self.project_id,
+            slot_id=self.slot_id,
+            token_label=self.token_label,
+            credentials={
+                "library_path": self.library_path,
+                "password": self.login
+            },
+            partition_metadata={},
+        )
+        plugin._create_pkcs11 = mock.MagicMock()
+        plugin._create_pkcs11.return_value = self.pkcs11
+
+        original_env = os.environ.get("CS_PKCS11_R3_CFG")
+        plugin._configure_pkcs11(self.project_id)
+        self.assertEqual(original_env, os.environ.get("CS_PKCS11_R3_CFG"))
+
+    def test_generate_utimaco_cfg(self):
+        plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
+        cfg_path = plugin._generate_utimaco_cfg(0, "10.246.244.60")
+
+        self.assertTrue(os.path.exists(cfg_path))
+        with open(cfg_path) as f:
+            content = f.read()
+        self.assertIn("[Global]", content)
+        self.assertIn("SlotCount = 10", content)
+        self.assertIn("[HSMCluster]", content)
+        self.assertIn("Devices = 4000@10.246.244.60", content)
 
 
 class WhenTestingVendorPluginConfigurationIsolation(utils.BaseTestCase):
