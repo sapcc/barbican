@@ -329,13 +329,23 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         )
         with open(cfg_path, "w") as f:
             f.write(cfg_content)
+        LOG.debug(
+            "Generated Utimaco cfg at %s:\n%s", cfg_path, cfg_content
+        )
         return cfg_path
 
     def _configure_pkcs11(self, project_id):
         """Configure PKCS11 for the specified project if needed."""
 
+        LOG.debug(
+            "Configuring PKCS11 for project %s (current: %s, pkcs11: %s)",
+            project_id, self.current_project_id,
+            self.pkcs11 is not None,
+        )
+
         # If we're already configured for this project, do nothing
         if project_id == self.current_project_id and self.pkcs11 is not None:
+            LOG.debug("Already configured for project %s, skipping", project_id)
             return
 
         # Get partition config for the project
@@ -352,14 +362,31 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
             [partition.token_label] if partition.token_label else None
         )
 
+        LOG.debug(
+            "Partition config: slot_id=%s, token_label=%s, metadata=%s",
+            self.slot_id, self.token_labels, partition.partition_metadata,
+        )
+
         device_ip = (partition.partition_metadata or {}).get("device_ip")
         if device_ip:
             cfg_path = self._generate_utimaco_cfg(self.slot_id, device_ip)
             os.environ["CS_PKCS11_R3_CFG"] = cfg_path
+            LOG.info(
+                "Set CS_PKCS11_R3_CFG=%s (device=%s, port=%d)",
+                cfg_path, device_ip, self.slot_id + 4000,
+            )
+        else:
+            LOG.warning(
+                "No device_ip in partition_metadata for project %s, "
+                "CS_PKCS11_R3_CFG not set",
+                project_id,
+            )
 
         # Create new PKCS11 instance
+        LOG.debug("Creating new PKCS11 instance")
         self.pkcs11 = self._create_pkcs11(None)
         self._configure_object_cache()
+        LOG.debug("PKCS11 configured successfully for project %s", project_id)
 
     def get_plugin_name(self):
         """Gets user-friendly plugin name."""
@@ -380,6 +407,10 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         )
 
     def bind_kek_metadata(self, kek_meta_dto):
+        LOG.debug(
+            "bind_kek_metadata called with kek_label: %s",
+            kek_meta_dto.kek_label,
+        )
         # Extract project_id from the kek_label in kek_meta_dto
         # The format is "project-{external_id}-key-{uuid}"
         try:
