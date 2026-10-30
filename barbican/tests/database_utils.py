@@ -255,6 +255,21 @@ def create_project_quotas(project=None, parsed_project_quotas=None,
     return project_quota
 
 
+def create_hsm_partition_config(project=None, slot_id="0",
+                                token_label="token", partition_label="part",
+                                credentials=None, session=None):
+    hsm_partition_config = models.HSMPartitionConfig(
+        project_id=project.id,
+        slot_id=slot_id,
+        token_label=token_label,
+        partition_label=partition_label,
+        credentials=credentials or {"user": "cu", "password": "secret"})
+    hsm_partition_config.status = models.States.ACTIVE
+    hsm_repo = repositories.get_hsm_partition_config_repository()
+    hsm_repo.create_from(hsm_partition_config, session=session)
+    return hsm_partition_config
+
+
 def create_acl_secret(secret=None, user_ids=[], session=None):
     acl_secret = models.SecretACL(secret.id, "read")
     acl_secret.secret_id = secret.id
