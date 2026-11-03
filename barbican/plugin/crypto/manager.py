@@ -7,11 +7,13 @@
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
-# implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+# implied.  See the License for the specific language governing
+# permissions and limitations under the License.
+
+from importlib import metadata as importlib_metadata
 
 from oslo_config import cfg
+from stevedore import extension as stevedore_extension
 from stevedore import named
 import threading
 
@@ -19,8 +21,12 @@ from barbican.common import config
 from barbican.common import utils
 from barbican import i18n as u
 from barbican.plugin.crypto import base
+from barbican.plugin.crypto import hsm_partition_crypto
 from barbican.plugin.util import multiple_backends
 from barbican.plugin.util import utils as plugin_utils
+
+
+LOG = utils.getLogger(__name__)
 
 
 _PLUGIN_MANAGER = None
@@ -54,6 +60,24 @@ def list_opts():
     yield crypto_opt_group, crypto_opts
 
 
+def get_plugin_name(plugin):
+    """Return the routing identity for a crypto plugin.
+
+    HSMPartitionCryptoPlugin instances share a Python class path, so
+    generate_fullname_for() cannot distinguish per-instance plugins.
+    For those, prefer legacy_plugin_name (set only when inheriting
+    kek_data rows from a pre-rename deployment), otherwise use the
+    configured plugin_name. All other plugins keep the historical
+    class-path identity.
+    """
+    if isinstance(plugin, hsm_partition_crypto.HSMPartitionCryptoPlugin):
+        legacy = getattr(plugin.conf, "legacy_plugin_name", None)
+        if legacy:
+            return legacy
+        return plugin.get_plugin_name()
+    return utils.generate_fullname_for(plugin)
+
+
 class _CryptoPluginManager(named.NamedExtensionManager):
     def __init__(self, conf=CONF, invoke_args=(), invoke_kwargs={}):
         """Crypto Plugin Manager
@@ -77,6 +101,70 @@ class _CryptoPluginManager(named.NamedExtensionManager):
 
         plugin_utils.instantiate_plugins(
             self, invoke_args, invoke_kwargs)
+
+        # Also instantiate one HSMPartitionCryptoPlugin per configured
+        # [hsm_partition_crypto_plugins] plugin_names entry.
+        self._instantiate_hsm_partition_plugins(invoke_args, invoke_kwargs)
+
+    def _instantiate_hsm_partition_plugins(self, invoke_args, invoke_kwargs):
+        plugin_names = (
+            hsm_partition_crypto.CONF
+            .hsm_partition_crypto_plugins.plugin_names
+        )
+        LOG.info(
+            "Instantiating HSM partition crypto plugins for: %s",
+            plugin_names or "(none configured)")
+        seen_names = set()
+
+        for name in plugin_names:
+            if name in seen_names:
+                raise ValueError(
+                    "duplicate plugin name '%s' in "
+                    "[hsm_partition_crypto_plugins] plugin_names — each "
+                    "entry must appear once" % name
+                )
+            seen_names.add(name)
+
+            try:
+                plugin_inst = hsm_partition_crypto.HSMPartitionCryptoPlugin(
+                    *invoke_args,
+                    store_plugin_name=name,
+                    **invoke_kwargs,
+                )
+            except Exception:
+                LOG.exception(
+                    "Failed to instantiate HSMPartitionCryptoPlugin for "
+                    "'%s'", name)
+                continue
+
+            ext = stevedore_extension.Extension(
+                name=name,
+                entry_point=importlib_metadata.EntryPoint(
+                    name=name,
+                    value=(
+                        "barbican.plugin.crypto.hsm_partition_crypto:"
+                        "HSMPartitionCryptoPlugin"
+                    ),
+                    group=DEFAULT_PLUGIN_NAMESPACE,
+                ),
+                plugin=type(plugin_inst),
+                obj=plugin_inst,
+            )
+
+            # Replace any stevedore stub with the same name (obj=None) that
+            # was added by the named extension load but couldn't resolve to
+            # an entry point. The dynamically-created instance must win.
+            for i, existing in enumerate(self.extensions):
+                if existing.name == name:
+                    LOG.debug(
+                        "Replacing stevedore stub for '%s' with live "
+                        "HSMPartitionCryptoPlugin instance", name)
+                    self.extensions[i] = ext
+                    break
+            else:
+                self.extensions.append(ext)
+
+            LOG.info("Registered hsm_partition_crypto_plugin:%s)", name)
 
     def get_plugin_store_generate(self, type_needed, algorithm=None,
                                   bit_length=None, mode=None, project_id=None):
@@ -121,7 +209,7 @@ class _CryptoPluginManager(named.NamedExtensionManager):
             raise base.CryptoPluginNotFound()
 
         for decrypting_plugin in active_plugins:
-            plugin_name = utils.generate_fullname_for(decrypting_plugin)
+            plugin_name = get_plugin_name(decrypting_plugin)
             if plugin_name == plugin_name_for_store:
                 break
         else:

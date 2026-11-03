@@ -16,7 +16,6 @@ import base64
 from sqlalchemy import inspect as sa_inspect
 
 from barbican.common import config
-from barbican.common import utils
 from barbican.model import models
 from barbican.model import repositories
 from barbican.plugin.crypto import base
@@ -280,7 +279,7 @@ def _find_or_create_kek_objects(plugin_inst, project_model):
     kek_repo = repositories.get_kek_datum_repository()
 
     # Find or create a key encryption key.
-    full_plugin_name = utils.generate_fullname_for(plugin_inst)
+    full_plugin_name = manager.get_plugin_name(plugin_inst)
     kek_datum_model = kek_repo.find_or_create_kek_datum(project_model,
                                                         full_plugin_name)
 
