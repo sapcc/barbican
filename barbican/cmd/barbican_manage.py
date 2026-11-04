@@ -424,21 +424,21 @@ class SAPCommands(object):
         "-p",
         dest="external_project_id",
         metavar="<external-project-id>",
-        help="External project ID",
+        help="External project ID (OpenStack project ID)",
     )
     @args(
         "--partition-label",
         "-l",
         dest="partition_label",
         metavar="<partition-label>",
-        help="Label for the HSM partition",
+        help="Label for the Thales HSM partition",
     )
     @args(
         "--token-label",
         "-t",
         dest="token_label",
         metavar="<token-label>",
-        help="Token label",
+        help="Token label for the HSM partition/container",
     )
     @args(
         "--slot-id",
@@ -446,13 +446,13 @@ class SAPCommands(object):
         dest="slot_id",
         type=int,
         metavar="<slot-id>",
-        help="Slot ID for the HSM",
+        help="Slot ID associated with the token",
     )
     @args(
         "--password",
         dest="password",
         metavar="<password>",
-        help="Password/PIN for the HSM",
+        help="Password/PIN for the token",
     )
     @args(
         "--partition-id",
@@ -465,6 +465,31 @@ class SAPCommands(object):
         dest="device_ip",
         metavar="<device-ip>",
         help="IP address of the Utimaco HSM device",
+    )
+    @args(
+        "--token-serial-number",
+        dest="token_serial_number",
+        metavar="<token-serial-number>",
+        help="Token serial number used to select the Utimaco HSM container slot",
+    )
+    @args(
+        "--container-id",
+        dest="container_id",
+        type=int,
+        metavar="<container-id>",
+        help="Utimaco container ID (port = 4000 + container_id)",
+    )
+    @args(
+        "--mkek-label",
+        dest="mkek_label",
+        metavar="<mkek-label>",
+        help="MKEK label stored in this token",
+    )
+    @args(
+        "--hmac-label",
+        dest="hmac_label",
+        metavar="<hmac-label>",
+        help="HMAC key label stored in this token",
     )
     @args(
         "--debug",
@@ -483,6 +508,10 @@ class SAPCommands(object):
         password=None,
         partition_id=None,
         device_ip=None,
+        token_serial_number=None,
+        container_id=None,
+        mkek_label=None,
+        hmac_label=None,
         debug=False,
     ):
         parsed_args = argparse.Namespace(
@@ -493,6 +522,10 @@ class SAPCommands(object):
             partition_id=partition_id,
             partition_label=partition_label,
             device_ip=device_ip,
+            token_serial_number=token_serial_number,
+            container_id=container_id,
+            mkek_label=mkek_label,
+            hmac_label=hmac_label,
             debug=debug,
         )
         create_hsm_partition(parsed_args)
