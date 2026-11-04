@@ -70,21 +70,40 @@ def create_hsm_partition(args):
     # Step 3: Create new HSM partition config for the project
     hsm_partition_config_obj = models.HSMPartitionConfig()
     # Always set the id explicitly for HSMPartitionConfig
-    hsm_partition_config_obj.id = args.partition_id or str(uuid.uuid4())
+    hsm_partition_config_obj.id = (
+        getattr(args, "partition_id", None) or str(uuid.uuid4())
+    )
     hsm_partition_config_obj.created_at = timeutils.utcnow()
     hsm_partition_config_obj.updated_at = timeutils.utcnow()
     hsm_partition_config_obj.project_id = project.id
-    hsm_partition_config_obj.partition_label = args.partition_label or ""
-    hsm_partition_config_obj.token_label = args.token_label
-    hsm_partition_config_obj.slot_id = args.slot_id
+    # partition_label / token_label / slot_id are needed by Thales only
+    hsm_partition_config_obj.partition_label = (
+        getattr(args, "partition_label", None) or ""
+    )
+    hsm_partition_config_obj.token_label = (
+        getattr(args, "token_label", None) or ""
+    )
+    hsm_partition_config_obj.slot_id = (
+        getattr(args, "slot_id", None) if getattr(args, "slot_id", None)
+        is not None else 0
+    )
     hsm_partition_config_obj.credentials = {"password": args.password}
     hsm_partition_config_obj.status = models.States.ACTIVE
     hsm_partition_config_obj.deleted = False
 
-    if getattr(args, 'device_ip', None):
-        hsm_partition_config_obj.partition_metadata = {
-            "device_ip": args.device_ip
-        }
+    metadata = {}
+    if getattr(args, "device_ip", None):
+        metadata["device_ip"] = args.device_ip
+    if getattr(args, "token_serial_number", None):
+        metadata["token_serial_number"] = args.token_serial_number
+    if getattr(args, "container_id", None) is not None:
+        metadata["container_id"] = args.container_id
+    if getattr(args, "mkek_label", None):
+        metadata["mkek_label"] = args.mkek_label
+    if getattr(args, "hmac_label", None):
+        metadata["hmac_label"] = args.hmac_label
+    if metadata:
+        hsm_partition_config_obj.partition_metadata = metadata
 
     try:
         hsm_partition_config = hsm_partition_config_repo.create_from(
