@@ -360,9 +360,9 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
             )
         )
 
-    def _generate_utimaco_cfg(self, slot_id, device_ip):
+    def _generate_utimaco_cfg(self, container_id, device_ip):
         """Generate an Utimaco PKCS#11 cfg file and return its path."""
-        port = slot_id + 4000
+        port = container_id + 4000
         cfg_content = (
             "[Global]\n"
             "Logpath = /tmp\n"
@@ -405,32 +405,48 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         # Store current project and partition
         self.current_project_id = project_id
         self.current_partition = partition
-
-        # Set required attributes for parent class
         self.login = partition.credentials["password"]
-        self.slot_id = int(partition.slot_id)
-        self.token_labels = (
-            [partition.token_label] if partition.token_label else None
-        )
+
+        # Utimaco containers use token serial number; otherwise fall
+        # back to token label / slot id so legacy partitions keep working.
+        metadata = partition.partition_metadata or {}
+        self.token_serial_number = metadata.get("token_serial_number")
+        slot_id = int(partition.slot_id)
+        if self.token_serial_number:
+            self.slot_id = None
+            self.token_labels = None
+        else:
+            self.slot_id = slot_id
+            self.token_labels = (
+                [partition.token_label] if partition.token_label else None
+            )
+
+        # Per-partition MKEK/HMAC label overrides. Fall back to the
+        # config-section defaults when the partition record is silent.
+        self.mkek_label = metadata.get("mkek_label") or self.conf.mkek_label
+        self.hmac_label = metadata.get("hmac_label") or self.conf.hmac_label
 
         LOG.debug(
-            "Partition config: slot_id=%s, token_label=%s, metadata=%s",
-            self.slot_id, self.token_labels, partition.partition_metadata,
+            "Partition config: slot_id=%s, token_label=%s, "
+            "token_serial_number=%s, mkek_label=%s, hmac_label=%s, "
+            "metadata=%s",
+            self.slot_id, self.token_labels, self.token_serial_number,
+            self.mkek_label, self.hmac_label, metadata,
         )
 
-        device_ip = (partition.partition_metadata or {}).get("device_ip")
-        if device_ip:
-            cfg_path = self._generate_utimaco_cfg(self.slot_id, device_ip)
+        device_ip = metadata.get("device_ip")
+        container_id = metadata.get("container_id")
+        if (
+            device_ip
+            and container_id is not None
+            and self.token_serial_number
+        ):
+            container_id = int(container_id)
+            cfg_path = self._generate_utimaco_cfg(container_id, device_ip)
             os.environ["CS_PKCS11_R3_CFG"] = cfg_path
             LOG.info(
                 "Set CS_PKCS11_R3_CFG=%s (device=%s, port=%d)",
-                cfg_path, device_ip, self.slot_id + 4000,
-            )
-        else:
-            LOG.warning(
-                "No device_ip in partition_metadata for project %s, "
-                "CS_PKCS11_R3_CFG not set",
-                project_id,
+                cfg_path, device_ip, container_id + 4000,
             )
 
         # Create new PKCS11 instance

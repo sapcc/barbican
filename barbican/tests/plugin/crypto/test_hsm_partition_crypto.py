@@ -213,13 +213,73 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         plugin._create_pkcs11 = mock.MagicMock()
         plugin._create_pkcs11.return_value = self.pkcs11
 
+        os.environ.pop("CS_PKCS11_R3_CFG", None)
         plugin._configure_pkcs11(self.project_id)
 
         self.assertEqual(self.library_path, plugin.library_path)
         self.assertEqual(self.login, plugin.login)
         self.assertEqual(int(self.slot_id), plugin.slot_id)
         self.assertEqual([self.token_label], plugin.token_labels)
+        self.assertIsNone(plugin.token_serial_number)
+        self.assertNotIn("CS_PKCS11_R3_CFG", os.environ)
         self.assertEqual(1, plugin._create_pkcs11.call_count)
+
+    def test_configure_pkcs11_utimaco_metadata(self):
+        plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
+        plugin._get_partition_for_project = mock.MagicMock()
+        plugin._get_partition_for_project.return_value = HSMPartitionConfig(
+            project_id=self.project_id,
+            slot_id="0",
+            token_label="",
+            credentials={"password": self.login},
+            partition_metadata={
+                "device_ip": "10.0.0.1",
+                "container_id": 9,
+                "token_serial_number": "016df7f4be_0001",
+                "mkek_label": "part-mkek",
+                "hmac_label": "part-hmac",
+            },
+        )
+        plugin._create_pkcs11 = mock.MagicMock(return_value=self.pkcs11)
+        plugin._generate_utimaco_cfg = mock.MagicMock(
+            return_value="/tmp/utimaco/cs_pkcs11_R3_10.0.0.1_4009.cfg"
+        )
+
+        os.environ.pop("CS_PKCS11_R3_CFG", None)
+        plugin._configure_pkcs11(self.project_id)
+
+        self.assertEqual("016df7f4be_0001", plugin.token_serial_number)
+        self.assertIsNone(plugin.slot_id)
+        self.assertIsNone(plugin.token_labels)
+        self.assertEqual("part-mkek", plugin.mkek_label)
+        self.assertEqual("part-hmac", plugin.hmac_label)
+        plugin._generate_utimaco_cfg.assert_called_once_with(9, "10.0.0.1")
+        self.assertEqual(
+            "/tmp/utimaco/cs_pkcs11_R3_10.0.0.1_4009.cfg",
+            os.environ["CS_PKCS11_R3_CFG"],
+        )
+
+    def test_configure_pkcs11_serial_only_no_utimaco_cfg(self):
+        plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
+        plugin._get_partition_for_project = mock.MagicMock()
+        plugin._get_partition_for_project.return_value = HSMPartitionConfig(
+            project_id=self.project_id,
+            slot_id=self.slot_id,
+            token_label=self.token_label,
+            credentials={"password": self.login},
+            partition_metadata={"token_serial_number": "serial-xyz"},
+        )
+        plugin._create_pkcs11 = mock.MagicMock(return_value=self.pkcs11)
+        plugin._generate_utimaco_cfg = mock.MagicMock()
+
+        os.environ.pop("CS_PKCS11_R3_CFG", None)
+        plugin._configure_pkcs11(self.project_id)
+
+        self.assertEqual("serial-xyz", plugin.token_serial_number)
+        self.assertIsNone(plugin.slot_id)
+        self.assertIsNone(plugin.token_labels)
+        plugin._generate_utimaco_cfg.assert_not_called()
+        self.assertNotIn("CS_PKCS11_R3_CFG", os.environ)
 
     def test_get_plugin_name_for_default_store_plugin_name(self):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
@@ -413,7 +473,11 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
                 "library_path": self.library_path,
                 "password": self.login
             },
-            partition_metadata={"device_ip": "10.246.244.60"},
+            partition_metadata={
+                "device_ip": "10.246.244.60",
+                "container_id": 0,
+                "token_serial_number": "016df7f4be_0001",
+            },
         )
         plugin._create_pkcs11 = mock.MagicMock()
         plugin._create_pkcs11.return_value = self.pkcs11
