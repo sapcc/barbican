@@ -14,7 +14,6 @@
 #    under the License.
 
 import os
-import tempfile
 
 from oslo_config import cfg
 
@@ -360,8 +359,16 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
             )
         )
 
+    # Path the Utimaco PKCS#11 library was initialized with. The library
+    # caches CS_PKCS11_R3_CFG at C_Initialize and ignores later env
+    # changes, so we rewrite THIS file in place for every partition
+    # switch.
+    _UTIMACO_CFG_PATH = os.environ.get(
+        "CS_PKCS11_R3_CFG", "/tmp/utimaco/cs_pkcs11_R3.cfg"
+    )
+
     def _generate_utimaco_cfg(self, container_id, device_ip):
-        """Generate an Utimaco PKCS#11 cfg file and return its path."""
+        """Rewrite the Utimaco PKCS#11 cfg in place and return its path."""
         port = container_id + 4000
         cfg_content = (
             "[Global]\n"
@@ -373,15 +380,12 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
             "[HSMCluster]\n"
             f"Devices = {port}@{device_ip}\n"
         )
-        cfg_dir = os.path.join(tempfile.gettempdir(), "utimaco")
-        os.makedirs(cfg_dir, exist_ok=True)
-        cfg_path = os.path.join(
-            cfg_dir, f"cs_pkcs11_R3_{device_ip}_{port}.cfg"
-        )
+        cfg_path = self._UTIMACO_CFG_PATH
+        os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
         with open(cfg_path, "w") as f:
             f.write(cfg_content)
         LOG.debug(
-            "Generated Utimaco cfg at %s:\n%s", cfg_path, cfg_content
+            "Rewrote Utimaco cfg at %s:\n%s", cfg_path, cfg_content
         )
         return cfg_path
 

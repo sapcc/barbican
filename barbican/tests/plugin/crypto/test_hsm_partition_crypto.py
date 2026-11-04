@@ -482,18 +482,20 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         plugin._create_pkcs11 = mock.MagicMock()
         plugin._create_pkcs11.return_value = self.pkcs11
 
-        plugin._configure_pkcs11(self.project_id)
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            fixed_cfg = os.path.join(tmp, "cs_pkcs11_R3.cfg")
+            with mock.patch.object(
+                hsm_partition_crypto.HSMPartitionCryptoPlugin,
+                "_UTIMACO_CFG_PATH",
+                fixed_cfg,
+            ):
+                plugin._configure_pkcs11(self.project_id)
 
-        self.assertEqual(
-            os.environ.get("CS_PKCS11_R3_CFG"),
-            os.path.join(
-                os.path.dirname(os.environ["CS_PKCS11_R3_CFG"]),
-                "cs_pkcs11_R3_10.246.244.60_4000.cfg",
-            ),
-        )
-        with open(os.environ["CS_PKCS11_R3_CFG"]) as f:
-            content = f.read()
-        self.assertIn("Devices = 4000@10.246.244.60", content)
+                self.assertEqual(fixed_cfg, os.environ["CS_PKCS11_R3_CFG"])
+                with open(fixed_cfg) as f:
+                    content = f.read()
+                self.assertIn("Devices = 4000@10.246.244.60", content)
 
     def test_configure_pkcs11_without_device_ip(self):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
@@ -537,15 +539,25 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
 
     def test_generate_utimaco_cfg(self):
         plugin = hsm_partition_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
-        cfg_path = plugin._generate_utimaco_cfg(0, "10.246.244.60")
 
-        self.assertTrue(os.path.exists(cfg_path))
-        with open(cfg_path) as f:
-            content = f.read()
-        self.assertIn("[Global]", content)
-        self.assertIn("SlotCount = 10", content)
-        self.assertIn("[HSMCluster]", content)
-        self.assertIn("Devices = 4000@10.246.244.60", content)
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            fixed_cfg = os.path.join(tmp, "cs_pkcs11_R3.cfg")
+            with mock.patch.object(
+                hsm_partition_crypto.HSMPartitionCryptoPlugin,
+                "_UTIMACO_CFG_PATH",
+                fixed_cfg,
+            ):
+                cfg_path = plugin._generate_utimaco_cfg(0, "10.246.244.60")
+
+            self.assertEqual(fixed_cfg, cfg_path)
+            self.assertTrue(os.path.exists(cfg_path))
+            with open(cfg_path) as f:
+                content = f.read()
+            self.assertIn("[Global]", content)
+            self.assertIn("SlotCount = 10", content)
+            self.assertIn("[HSMCluster]", content)
+            self.assertIn("Devices = 4000@10.246.244.60", content)
 
 
 class WhenTestingVendorPluginConfigurationIsolation(utils.BaseTestCase):
