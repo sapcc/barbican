@@ -27,7 +27,7 @@ from oslo_log import log as logging
 
 from sqlalchemy import create_engine, text
 
-from barbican.cmd.hsm_partition_create import create_hsm_partition
+from barbican.cmd.cloudhsms_create import create_hsm_partition
 from barbican.cmd import pkcs11_kek_rewrap as pkcs11_rewrap
 from barbican.cmd import simple_crypto
 from barbican.common import config
@@ -419,6 +419,12 @@ class SAPCommands(object):
             except Exception as exc:
                 print(f"An error occurred: {exc}")
 
+    create_cloudhsms_config_description = (
+        "Onboard a project to an HSM secret store: validate connectivity "
+        "and key existence, create the hsm_partition_configs row, and set "
+        "the project preferred secret store."
+    )
+
     @args(
         "--external-project-id",
         "-p",
@@ -431,7 +437,7 @@ class SAPCommands(object):
         "-l",
         dest="partition_label",
         metavar="<partition-label>",
-        help="Label for the Thales HSM partition",
+        help="Label for the cloudhsms",
     )
     @args(
         "--token-label",
@@ -464,13 +470,15 @@ class SAPCommands(object):
         "--device-ip",
         dest="device_ip",
         metavar="<device-ip>",
-        help="IP address of the Utimaco HSM device",
+        help="IP address of the HSM device",
     )
     @args(
         "--token-serial-number",
         dest="token_serial_number",
         metavar="<token-serial-number>",
-        help="Token serial number used to select the Utimaco HSM container slot",
+        help=(
+            "Token serial number used to select the Utimaco HSM container slot"
+        ),
     )
     @args(
         "--container-id",
@@ -492,13 +500,27 @@ class SAPCommands(object):
         help="HMAC key label stored in this token",
     )
     @args(
+        "--secret-store-id",
+        dest="secret_store_id",
+        metavar="<secret-store-id>",
+        default=None,
+        help="Name of the secret store to set as the project preferred store",
+    )
+    @args(
+        "--library-path",
+        dest="library_path",
+        metavar="<library-path>",
+        default=None,
+        help="Path to the PKCS11 shared library on this host",
+    )
+    @args(
         "--debug",
         dest="debug",
         action="store_true",
         default=False,
         help="Enable debug output",
     )
-    def create_hsm_partition_config(
+    def create_cloudhsms_config(
         self,
         conf,
         external_project_id=None,
@@ -512,6 +534,8 @@ class SAPCommands(object):
         container_id=None,
         mkek_label=None,
         hmac_label=None,
+        secret_store_id=None,
+        library_path=None,
         debug=False,
     ):
         parsed_args = argparse.Namespace(
@@ -526,6 +550,8 @@ class SAPCommands(object):
             container_id=container_id,
             mkek_label=mkek_label,
             hmac_label=hmac_label,
+            secret_store_id=secret_store_id,
+            library_path=library_path,
             debug=debug,
         )
         create_hsm_partition(parsed_args)

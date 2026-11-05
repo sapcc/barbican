@@ -14,6 +14,7 @@
 #    under the License.
 
 import os
+import tempfile
 
 from oslo_config import cfg
 
@@ -364,7 +365,8 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
     # changes, so we rewrite THIS file in place for every partition
     # switch.
     _UTIMACO_CFG_PATH = os.environ.get(
-        "CS_PKCS11_R3_CFG", "/tmp/utimaco/cs_pkcs11_R3.cfg"
+        "CS_PKCS11_R3_CFG",
+        os.path.join(tempfile.gettempdir(), "utimaco", "cs_pkcs11_R3.cfg")
     )
 
     def _generate_utimaco_cfg(self, container_id, device_ip):
@@ -372,7 +374,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         port = container_id + 4000
         cfg_content = (
             "[Global]\n"
-            "Logpath = /tmp\n"
+            f"Logpath = {tempfile.gettempdir()}\n"
             "Logging = 4\n"
             "SlotMultiSession = true\n"
             "SlotCount = 10\n"
@@ -400,7 +402,8 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
 
         # If we're already configured for this project, do nothing
         if project_id == self.current_project_id and self.pkcs11 is not None:
-            LOG.debug("Already configured for project %s, skipping", project_id)
+            LOG.debug("Already configured for project %s, skipping",
+                      project_id)
             return
 
         # Get partition config for the project
@@ -510,3 +513,13 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         return super(HSMPartitionCryptoPlugin, self).generate_symmetric(
             generate_dto, kek_meta_dto, project_id
         )
+
+
+class UtimacocHSMCryptoPlugin(HSMPartitionCryptoPlugin):
+    """Utimaco cHSM-specific subclass of HSMPartitionCryptoPlugin."""
+    pass
+
+
+class ThalesPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
+    """Thales partition-specific subclass of HSMPartitionCryptoPlugin."""
+    pass
