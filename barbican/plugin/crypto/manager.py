@@ -109,7 +109,7 @@ class _CryptoPluginManager(named.NamedExtensionManager):
     def _instantiate_hsm_partition_plugins(self, invoke_args, invoke_kwargs):
         plugin_names = (
             cloudhsms_crypto.CONF
-            .cloudhsms_crypto_plugins.plugin_names
+            .hsm_partition_crypto_plugins.plugin_names
         )
         LOG.info(
             "Instantiating HSM partition crypto plugins for: %s",
