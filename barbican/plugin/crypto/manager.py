@@ -21,7 +21,7 @@ from barbican.common import config
 from barbican.common import utils
 from barbican import i18n as u
 from barbican.plugin.crypto import base
-from barbican.plugin.crypto import hsm_partition_crypto
+from barbican.plugin.crypto import cloudhsms_crypto
 from barbican.plugin.util import multiple_backends
 from barbican.plugin.util import utils as plugin_utils
 
@@ -70,7 +70,7 @@ def get_plugin_name(plugin):
     configured plugin_name. All other plugins keep the historical
     class-path identity.
     """
-    if isinstance(plugin, hsm_partition_crypto.HSMPartitionCryptoPlugin):
+    if isinstance(plugin, cloudhsms_crypto.HSMPartitionCryptoPlugin):
         legacy = getattr(plugin.conf, "legacy_plugin_name", None)
         if legacy:
             return legacy
@@ -103,13 +103,13 @@ class _CryptoPluginManager(named.NamedExtensionManager):
             self, invoke_args, invoke_kwargs)
 
         # Also instantiate one HSMPartitionCryptoPlugin per configured
-        # [hsm_partition_crypto_plugins] plugin_names entry.
+        # [cloudhsms_crypto_plugins] plugin_names entry.
         self._instantiate_hsm_partition_plugins(invoke_args, invoke_kwargs)
 
     def _instantiate_hsm_partition_plugins(self, invoke_args, invoke_kwargs):
         plugin_names = (
-            hsm_partition_crypto.CONF
-            .hsm_partition_crypto_plugins.plugin_names
+            cloudhsms_crypto.CONF
+            .cloudhsms_crypto_plugins.plugin_names
         )
         LOG.info(
             "Instantiating HSM partition crypto plugins for: %s",
@@ -120,13 +120,13 @@ class _CryptoPluginManager(named.NamedExtensionManager):
             if name in seen_names:
                 raise ValueError(
                     "duplicate plugin name '%s' in "
-                    "[hsm_partition_crypto_plugins] plugin_names — each "
+                    "[cloudhsms_crypto_plugins] plugin_names — each "
                     "entry must appear once" % name
                 )
             seen_names.add(name)
 
             try:
-                plugin_inst = hsm_partition_crypto.HSMPartitionCryptoPlugin(
+                plugin_inst = cloudhsms_crypto.HSMPartitionCryptoPlugin(
                     *invoke_args,
                     store_plugin_name=name,
                     **invoke_kwargs,
@@ -142,7 +142,7 @@ class _CryptoPluginManager(named.NamedExtensionManager):
                 entry_point=importlib_metadata.EntryPoint(
                     name=name,
                     value=(
-                        "barbican.plugin.crypto.hsm_partition_crypto:"
+                        "barbican.plugin.crypto.cloudhsms_crypto:"
                         "HSMPartitionCryptoPlugin"
                     ),
                     group=DEFAULT_PLUGIN_NAMESPACE,
@@ -164,7 +164,7 @@ class _CryptoPluginManager(named.NamedExtensionManager):
             else:
                 self.extensions.append(ext)
 
-            LOG.info("Registered hsm_partition_crypto_plugin:%s)", name)
+            LOG.info("Registered cloudhsms_crypto_plugin:%s)", name)
 
     def get_plugin_store_generate(self, type_needed, algorithm=None,
                                   bit_length=None, mode=None, project_id=None):

@@ -15,7 +15,7 @@ from unittest import mock
 
 from barbican.common import utils as common_utils
 from barbican.plugin.crypto import base
-from barbican.plugin.crypto import hsm_partition_crypto
+from barbican.plugin.crypto import cloudhsms_crypto
 from barbican.plugin.crypto import manager as cm
 from barbican.tests import utils
 
@@ -126,7 +126,7 @@ class WhenTestingPluginName(utils.BaseTestCase):
 
     def test_hsm_partition_plugin_uses_configured_name(self):
         plugin = mock.MagicMock(
-            spec=hsm_partition_crypto.HSMPartitionCryptoPlugin)
+            spec=cloudhsms_crypto.HSMPartitionCryptoPlugin)
         plugin.conf = mock.MagicMock(legacy_plugin_name=None)
         plugin.get_plugin_name.return_value = "utimaco_hsm_42"
 
@@ -134,28 +134,28 @@ class WhenTestingPluginName(utils.BaseTestCase):
 
     def test_hsm_partition_plugin_prefers_legacy_name(self):
         plugin = mock.MagicMock(
-            spec=hsm_partition_crypto.HSMPartitionCryptoPlugin)
+            spec=cloudhsms_crypto.HSMPartitionCryptoPlugin)
         plugin.conf = mock.MagicMock(
             legacy_plugin_name=(
-                "barbican.plugin.crypto.hsm_partition_crypto."
-                "UtimacoHSMPartitionCryptoPlugin"
+                "barbican.plugin.crypto.cloudhsms_crypto."
+                "UtimacocHSMCryptoPlugin"
             )
         )
         plugin.get_plugin_name.return_value = "utimaco_hsm_1"
 
         self.assertEqual(
-            "barbican.plugin.crypto.hsm_partition_crypto."
-            "UtimacoHSMPartitionCryptoPlugin",
+            "barbican.plugin.crypto.cloudhsms_crypto."
+            "UtimacocHSMCryptoPlugin",
             cm.get_plugin_name(plugin),
         )
 
     def test_two_hsm_instances_have_distinct_identity(self):
         a = mock.MagicMock(
-            spec=hsm_partition_crypto.HSMPartitionCryptoPlugin)
+            spec=cloudhsms_crypto.HSMPartitionCryptoPlugin)
         a.conf = mock.MagicMock(legacy_plugin_name=None)
         a.get_plugin_name.return_value = "utimaco_hsm"
         b = mock.MagicMock(
-            spec=hsm_partition_crypto.HSMPartitionCryptoPlugin)
+            spec=cloudhsms_crypto.HSMPartitionCryptoPlugin)
         b.conf = mock.MagicMock(legacy_plugin_name=None)
         b.get_plugin_name.return_value = "utimaco_hsm_2"
 
@@ -167,7 +167,7 @@ class WhenTestingApplianceInstantiation(utils.BaseTestCase):
 
     def _fake_plugin(self, plugin_name):
         inst = mock.MagicMock(
-            spec=hsm_partition_crypto.HSMPartitionCryptoPlugin)
+            spec=cloudhsms_crypto.HSMPartitionCryptoPlugin)
         inst.conf = mock.MagicMock(legacy_plugin_name=None)
         inst.get_plugin_name.return_value = plugin_name
         return inst
@@ -197,13 +197,13 @@ class WhenTestingApplianceInstantiation(utils.BaseTestCase):
         original_extensions = list(mgr.extensions)
         try:
             with mock.patch(
-                "barbican.plugin.crypto.hsm_partition_crypto.CONF"
+                "barbican.plugin.crypto.cloudhsms_crypto.CONF"
             ) as mock_conf, mock.patch(
-                "barbican.plugin.crypto.hsm_partition_crypto"
+                "barbican.plugin.crypto.cloudhsms_crypto"
                 ".HSMPartitionCryptoPlugin",
                 side_effect=[fake_a, fake_b],
             ):
-                mock_conf.hsm_partition_crypto_plugins.plugin_names = [
+                mock_conf.cloudhsms_crypto_plugins.plugin_names = [
                     "shared_appliance", "shared_appliance"]
                 self.assertRaises(
                     ValueError,
