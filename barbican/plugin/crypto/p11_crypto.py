@@ -16,6 +16,10 @@ import collections
 import threading
 import time
 
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.asymmetric import dsa
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization
 from oslo_config import cfg
 from oslo_serialization import jsonutils as json
 
@@ -195,7 +199,8 @@ class P11CryptoPlugin(plugin.CryptoPluginBase):
                                  kek_meta_dto, project_id)
 
     def generate_asymmetric(self, generate_dto, kek_meta_dto, project_id):
-        raise NotImplementedError(u._("Feature not implemented for PKCS11"))
+        return self._call_pkcs11(self._generate_asymmetric, generate_dto,
+                                 kek_meta_dto, project_id)
 
     def supports(self, type_enum, algorithm=None, bit_length=None, mode=None):
         if type_enum == plugin.PluginSupportTypes.ENCRYPT_DECRYPT:
@@ -203,7 +208,19 @@ class P11CryptoPlugin(plugin.CryptoPluginBase):
         elif type_enum == plugin.PluginSupportTypes.SYMMETRIC_KEY_GENERATION:
             return True
         elif type_enum == plugin.PluginSupportTypes.ASYMMETRIC_KEY_GENERATION:
-            return False
+            # Advertise support for the same RSA/DSA algorithm and bit-length
+            # matrix declared in plugin.PluginSupportTypes so orders are not
+            # rejected by the plugin manager before they reach us.
+            if algorithm is None:
+                return True
+            algorithm = algorithm.lower()
+            if algorithm not in \
+                    plugin.PluginSupportTypes.ASYMMETRIC_ALGORITHMS:
+                return False
+            if bit_length is not None and bit_length not in \
+                    plugin.PluginSupportTypes.ASYMMETRIC_KEY_LENGTHS:
+                return False
+            return True
         else:
             return False
 
@@ -285,6 +302,91 @@ class P11CryptoPlugin(plugin.CryptoPluginBase):
              'mechanism': self.encryption_mechanism}
         )
         return plugin.ResponseDTO(ct_data['ct'], kek_meta_extended)
+
+    def _get_encryption_algorithm(self, passphrase):
+        """Choose private-key serialization encryption.
+
+        BestAvailableEncryption fails on empty/None passphrases, so fall back
+        to NoEncryption when no passphrase was supplied by the client.
+        """
+        if not passphrase:
+            return serialization.NoEncryption()
+        if isinstance(passphrase, str):
+            passphrase = passphrase.encode('utf-8')
+        return serialization.BestAvailableEncryption(passphrase)
+
+    def _hsm_wrap_blob(self, blob, kek, session):
+        """Encrypt an arbitrary blob with the project's HSM-resident KEK.
+
+        Produces a ResponseDTO whose shape matches the one used by
+        ``_encrypt`` / ``_generate_symmetric`` so that the caller side
+        (``store_crypto``) and the ``_decrypt`` path stay unchanged.
+        """
+        ct_data = self.pkcs11.encrypt(kek, blob, session)
+        kek_meta_extended = json_dumps_compact(
+            {'iv': base64.b64encode(ct_data['iv']),
+             'mechanism': self.encryption_mechanism}
+        )
+        return plugin.ResponseDTO(ct_data['ct'], kek_meta_extended)
+
+    def _generate_asymmetric(self, generate_dto, kek_meta_dto, project_id):
+        """Generate an asymmetric key pair (RSA or DSA).
+
+        The key pair itself is generated in-process with the ``cryptography``
+        library. The serialized private key, public key, and (optional)
+        passphrase are then encrypted with the project's HSM-resident KEK
+        using the plugin's configured ``encryption_mechanism`` so that
+        confidentiality at rest is provided by the HSM, matching the
+        behaviour of ``_generate_symmetric``.
+        """
+        algorithm = (generate_dto.algorithm or 'rsa').lower()
+        bit_length = int(generate_dto.bit_length)
+        passphrase = generate_dto.passphrase
+
+        if algorithm == 'rsa':
+            private_key = rsa.generate_private_key(
+                public_exponent=65537,
+                key_size=bit_length,
+                backend=default_backend(),
+            )
+        elif algorithm == 'dsa':
+            private_key = dsa.generate_private_key(
+                key_size=bit_length,
+                backend=default_backend(),
+            )
+        else:
+            raise plugin.CryptoPrivateKeyFailureException()
+
+        public_key = private_key.public_key()
+
+        private_pem = private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=self._get_encryption_algorithm(passphrase),
+        )
+        public_pem = public_key.public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+
+        # Encrypt each component with the project KEK held in the HSM.
+        kek = self._load_kek_from_meta_dto(kek_meta_dto)
+        session = None
+        try:
+            session = self._get_session()
+            private_dto = self._hsm_wrap_blob(private_pem, kek, session)
+            public_dto = self._hsm_wrap_blob(public_pem, kek, session)
+            passphrase_dto = None
+            if passphrase:
+                pass_bytes = passphrase.encode('utf-8') \
+                    if isinstance(passphrase, str) else passphrase
+                passphrase_dto = self._hsm_wrap_blob(
+                    pass_bytes, kek, session)
+        finally:
+            if session is not None:
+                self._return_session(session)
+
+        return private_dto, public_dto, passphrase_dto
 
     def _configure_object_cache(self):
         # Master Key cache
