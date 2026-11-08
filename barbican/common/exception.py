@@ -171,6 +171,14 @@ class SecretIdNotAvailable(BarbicanHTTPException):
     status_code = 409
 
 
+class SecretRecoverNoTombstone(BarbicanHTTPException):
+    """409 - recover=true but no soft-deleted tombstone found for this id."""
+
+    message = u._("No deleted secret with this id exists in this project.")
+    client_message = message
+    status_code = 409
+
+
 class NotSupported(BarbicanException):
     message = u._("Operation is not supported.")
 

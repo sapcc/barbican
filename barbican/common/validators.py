@@ -192,6 +192,10 @@ class NewSecretValidator(ValidatorBase):
                         "[0-9a-f]{12}$"
                     ),
                 },
+                # sapcc-custom: recover=true revives the tombstoned secret and
+                # all its soft-deleted associations instead of purging them.
+                # Only meaningful when 'id' is also supplied.
+                "recover": {"type": "boolean"},
             },
         }
 

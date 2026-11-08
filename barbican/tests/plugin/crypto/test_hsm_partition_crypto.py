@@ -268,11 +268,16 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
 
     def test_encrypt_with_multi_threads(self):
         results = [None] * 10
+        threads = []
 
         # Setup 10 threads to call encrypt() at same time
         for i in range(10):
             t = PluginOperationThread(i, results)
+            threads.append(t)
             t.start()
+
+        for t in threads:
+            t.join()
 
         # Verify all threads return corresponding response
         for i in range(10):

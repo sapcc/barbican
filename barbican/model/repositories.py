@@ -271,10 +271,6 @@ def clean_paging_values(offset_arg=0, limit_arg=CONF.default_limit_paging):
         % {"limit": limit, "offset": offset}
     )
 
-    LOG.debug("Clean paging values limit=%(limit)s, offset=%(offset)s" %
-              {'limit': limit,
-               'offset': offset})
-
     return offset, limit
 
 
@@ -609,6 +605,11 @@ class SecretRepo(BaseRepo):
         sapcc-custom extension (not in upstream openstack/barbican).
         Lookup is project-scoped; cross-project PK collisions surface as a
         generic 409 to avoid disclosing other tenants' secret IDs.
+
+        When entity.recover is True and a soft-deleted tombstone exists, all
+        soft-deleted child rows (metadata, consumers, container-secrets, ACLs)
+        are revived in-place instead of being purged and re-inserted.  If no
+        tombstone is found with recover=True, a 409 is returned.
         """
         if not entity.id:
             return super(SecretRepo, self).create_from(
@@ -621,9 +622,10 @@ class SecretRepo(BaseRepo):
                     "id."))
 
         session = self.get_session(session)
+        recover = getattr(entity, "recover", False)
 
         try:
-            # SAVEPOINT keeps purge+insert atomic.
+            # SAVEPOINT keeps the operation atomic.
             with session.begin_nested():
                 existing = (session.query(models.Secret)
                             .filter_by(id=entity.id,
@@ -632,37 +634,81 @@ class SecretRepo(BaseRepo):
                 if existing is not None:
                     if not existing.deleted:
                         raise exception.SecretIdConflict()
-                    LOG.info(
-                        "sapcc-custom: hard-purging soft-deleted secret "
-                        "id=%s project_id=%s for key-recovery re-create.",
-                        existing.id, existing.project_id)
-                    # sapcc-custom: hard-purge the soft-deleted row + its
-                    # children with explicit row-level DELETEs so SQLAlchemy
-                    # does not try to NULL-out the NOT-NULL foreign keys on
-                    # secret_id (encrypted_data, secret_store_metadata,
-                    # secret_user_metadata, secret_consumer_metadata,
-                    # container_secret, secret_acls).
+
                     sid = existing.id
-                    for table in (models.EncryptedDatum,
-                                  models.SecretStoreMetadatum,
-                                  models.SecretUserMetadatum,
-                                  models.SecretConsumerMetadatum,
-                                  models.ContainerSecret,
-                                  models.SecretACL):
-                        session.query(table).filter_by(
-                            secret_id=sid).delete(
-                                synchronize_session=False)
-                    session.query(models.Secret).filter_by(id=sid).delete(
-                        synchronize_session=False)
-                    # sapcc-custom: only evict the purged row from the
-                    # identity map, not the whole session -- lighter than
-                    # session.expire_all() and does not surprise concurrent
-                    # code paths sharing this session.
-                    session.expunge(existing)
-                    session.flush()
+                    # Collect ACL IDs once; used by both branches to handle
+                    # SecretACLUser FK (acl_id) before touching SecretACL rows.
+                    acl_ids = [
+                        row.id for row in
+                        session.query(models.SecretACL.id).filter_by(
+                            secret_id=sid)
+                    ]
+                    _SECRET_CHILD_TABLES = (
+                        models.EncryptedDatum,
+                        models.SecretStoreMetadatum,
+                        models.SecretUserMetadatum,
+                        models.SecretConsumerMetadatum,
+                        models.ContainerSecret,
+                        models.SecretACL,
+                    )
+
+                    if recover:
+                        # sapcc-custom: revive the tombstoned secret and all
+                        # its soft-deleted children so consumers/containers
+                        # continue working without recreation.
+                        LOG.info(
+                            "sapcc-custom: reviving tombstoned secret "
+                            "id=%s project_id=%s (recover=true).",
+                            sid, existing.project_id)
+                        revive = {"deleted": False, "deleted_at": None,
+                                  "updated_at": timeutils.utcnow()}
+                        # Revive SecretACLUser rows first (FK: acl_id ->
+                        # secret_acls.id) before reviving SecretACL rows.
+                        if acl_ids:
+                            session.query(models.SecretACLUser).filter(
+                                models.SecretACLUser.acl_id.in_(acl_ids)
+                            ).update(revive, synchronize_session=False)
+                        for table in _SECRET_CHILD_TABLES:
+                            session.query(table).filter_by(
+                                secret_id=sid).update(
+                                    revive, synchronize_session=False)
+                        # Mutate the loaded ORM object directly; avoids a
+                        # bulk UPDATE + expire + implicit re-SELECT cycle.
+                        existing.deleted = False
+                        existing.deleted_at = None
+                        session.flush()
+                        return existing
+                    else:
+                        # sapcc-custom: hard-purge the soft-deleted row + its
+                        # children with explicit row-level DELETEs so
+                        # SQLAlchemy does not try to NULL-out the NOT-NULL
+                        # foreign keys on secret_id.
+                        # Delete SecretACLUser rows (FK: acl_id) before
+                        # SecretACL rows to avoid FK constraint violations.
+                        LOG.info(
+                            "sapcc-custom: hard-purging soft-deleted secret "
+                            "id=%s project_id=%s for key-recovery re-create.",
+                            sid, existing.project_id)
+                        if acl_ids:
+                            session.query(models.SecretACLUser).filter(
+                                models.SecretACLUser.acl_id.in_(acl_ids)
+                            ).delete(synchronize_session=False)
+                        for table in _SECRET_CHILD_TABLES:
+                            session.query(table).filter_by(
+                                secret_id=sid).delete(
+                                    synchronize_session=False)
+                        session.query(models.Secret).filter_by(
+                            id=sid).delete(synchronize_session=False)
+                        session.expunge(existing)
+                        session.flush()
+                elif recover:
+                    # recover=True but no tombstone — nothing to revive.
+                    raise exception.SecretRecoverNoTombstone()
+
                 return super(SecretRepo, self).create_from(
                     entity, session=session)
-        except exception.SecretIdConflict:
+        except (exception.SecretIdConflict,
+                exception.SecretRecoverNoTombstone):
             raise
         except exception.ConstraintCheck:
             # sapcc-custom: BaseRepo wraps DBDuplicateEntry into
@@ -679,7 +725,10 @@ class SecretRepo(BaseRepo):
             raise exception.SecretIdNotAvailable()
         except (db_exc.DBDuplicateEntry, sa.exc.IntegrityError):
             # Defence in depth in case BaseRepo stops wrapping.
-            session.rollback()
+            # Do NOT call session.rollback() here — the begin_nested()
+            # SAVEPOINT already rolled back automatically; a full rollback
+            # would discard unrelated changes made earlier in the same
+            # request (e.g. a newly created project row).
             LOG.info("sapcc-custom: caller-supplied UUID rejected at "
                      "INSERT (project_id=%s id=%s); likely a concurrent "
                      "duplicate.",
@@ -735,8 +784,14 @@ class SecretRepo(BaseRepo):
             query = self._build_sort_filter_query(query, sort)
 
         if acl_only and acl_only.lower() == 'true' and user_id:
-            query = query.join(models.SecretACL)
-            query = query.join(models.SecretACLUser)
+            query = query.join(
+                models.SecretACL,
+                (models.SecretACL.secret_id == models.Secret.id) &
+                (models.SecretACL.deleted == False))  # noqa: E712
+            query = query.join(
+                models.SecretACLUser,
+                (models.SecretACLUser.acl_id == models.SecretACL.id) &
+                (models.SecretACLUser.deleted == False))  # noqa: E712
             query = query.filter(models.SecretACLUser.user_id == user_id)
         else:
             query = query.join(models.Project)
@@ -2026,8 +2081,8 @@ class SecretACLRepo(BaseRepo):
     SecretACLUser (ACL user data) directly. Its always derived from
     SecretACL relationship.
 
-    SecretACL and SecretACLUser data is not soft delete. So there is no need
-    to have deleted=False filter in queries.
+    sapcc-custom: SecretACL now uses soft-delete (SoftDeleteMixIn) so all
+    queries must filter deleted=False to exclude tombstoned rows.
     """
 
     def _do_entity_name(self):
@@ -2037,7 +2092,7 @@ class SecretACLRepo(BaseRepo):
     def _do_build_get_query(self, entity_id, external_project_id, session):
         """Sub-class hook: build a retrieve query."""
         query = session.query(models.SecretACL)
-        query = query.filter_by(id=entity_id)
+        query = query.filter_by(id=entity_id, deleted=False)
         return query
 
     def _do_validate(self, values):
@@ -2050,16 +2105,34 @@ class SecretACLRepo(BaseRepo):
         session = self.get_session(session)
 
         query = session.query(models.SecretACL)
-        query = query.filter_by(secret_id=secret_id)
+        query = query.filter_by(secret_id=secret_id, deleted=False)
 
         return query.all()
 
     def create_or_replace_from(self, secret, secret_acl, user_ids=None,
                                session=None):
         session = self.get_session(session)
+
+        # sapcc-custom: if a soft-deleted tombstone exists for the same
+        # (secret_id, operation), revive it in-place to avoid violating the
+        # _secret_acl_operation_uc unique constraint on (secret_id, operation).
+        tombstone = session.query(models.SecretACL).filter_by(
+            secret_id=secret.id,
+            operation=secret_acl.operation,
+            deleted=True,
+        ).first()
+        if tombstone is not None:
+            tombstone.deleted = False
+            tombstone.deleted_at = None
+            if secret_acl.project_access is not None:
+                tombstone.project_access = secret_acl.project_access
+            tombstone.updated_at = timeutils.utcnow()
+            secret_acl = tombstone
+
         secret.updated_at = timeutils.utcnow()
         secret_acl.updated_at = timeutils.utcnow()
-        secret.secret_acls.append(secret_acl)
+        if secret_acl not in secret.secret_acls:
+            secret.secret_acls.append(secret_acl)
         secret.save(session=session)
 
         self._create_or_replace_acl_users(secret_acl, user_ids,
@@ -2088,7 +2161,16 @@ class SecretACLRepo(BaseRepo):
         secret_acl.updated_at = now
 
         for acl_user in secret_acl.acl_users:
-            if acl_user.user_id in user_ids:  # input user_id already exists
+            if acl_user.deleted:
+                if acl_user.user_id in user_ids:
+                    # Revive soft-deleted user to avoid UniqueConstraint
+                    # on (acl_id, user_id) when re-adding a removed user.
+                    acl_user.deleted = False
+                    acl_user.deleted_at = None
+                    acl_user.updated_at = now
+                    user_ids.remove(acl_user.user_id)
+                # else: leave soft-deleted, it's excluded by query filters
+            elif acl_user.user_id in user_ids:  # input user_id already exists
                 acl_user.updated_at = now
                 user_ids.remove(acl_user.user_id)
             else:
@@ -2104,7 +2186,8 @@ class SecretACLRepo(BaseRepo):
         """Gets count of existing secret ACL(s) for a given secret."""
         session = self.get_session(session)
         query = session.query(sa_func.count(models.SecretACL.id))
-        query = query.filter(models.SecretACL.secret_id == secret_id)
+        query = query.filter(models.SecretACL.secret_id == secret_id,
+                             models.SecretACL.deleted == False)  # noqa: E712
         return query.scalar()
 
     def delete_acls_for_secret(self, secret, session=None):
@@ -2125,7 +2208,7 @@ class SecretACLUserRepo(BaseRepo):
         """Sub-class hook: build a retrieve query."""
 
         query = session.query(models.SecretACLUser)
-        query = query.filter_by(id=entity_id)
+        query = query.filter_by(id=entity_id, deleted=False)
 
         return query
 
