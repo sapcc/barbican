@@ -112,6 +112,29 @@ p11_crypto_plugin_opts = [
                 help=u._('Enable CKF_OS_LOCKING_OK flag when initializing the '
                          'PKCS#11 client library.'),
                 default=False),
+    # SAPCC: knobs to make plugin initialization survive a slow / transiently
+    # unreachable HSM (e.g. a Thales Luna HA group that is still bringing up
+    # its members when barbican-api starts). Without this, a single
+    # P11CryptoTokenException / P11CryptoPluginException at __init__() time
+    # would poison the plugin for the entire lifetime of the process,
+    # forcing an operator-driven pod restart. See release note.
+    cfg.IntOpt('plugin_init_retries',
+               help=u._('Number of attempts to initialise the PKCS#11 client '
+                        'library on plugin startup. Each retry is spaced by '
+                        'plugin_init_retry_delay seconds with exponential '
+                        'backoff (capped at plugin_init_retry_max_delay). '
+                        'Set to 1 to disable retrying and preserve the pre-'
+                        'SAPCC behaviour.'),
+               default=5, min=1),
+    cfg.FloatOpt('plugin_init_retry_delay',
+                 help=u._('Initial delay in seconds between plugin '
+                          'initialization retries.'),
+                 default=2.0, min=0.0),
+    cfg.FloatOpt('plugin_init_retry_max_delay',
+                 help=u._('Maximum delay in seconds between plugin '
+                          'initialization retries (used as the cap for '
+                          'exponential backoff).'),
+                 default=30.0, min=0.0),
 ]
 CONF.register_group(p11_crypto_plugin_group)
 CONF.register_opts(p11_crypto_plugin_opts, group=p11_crypto_plugin_group)
@@ -170,10 +193,60 @@ class P11CryptoPlugin(plugin.CryptoPluginBase):
         self.pkek_cache_ttl = plugin_conf.pkek_cache_ttl
         self.pkek_cache_limit = plugin_conf.pkek_cache_limit
 
-        # Use specified or create new pkcs11 object
-        self.pkcs11 = pkcs11 or self._create_pkcs11(ffi)
+        # Use specified or create new pkcs11 object. When ``pkcs11`` is
+        # supplied (unit tests) we do not retry. In production
+        # ``_create_pkcs11`` may transiently fail if the HSM / Luna HA group
+        # has not finished converging yet; retry with exponential backoff
+        # rather than letting the exception poison the plugin for the whole
+        # process lifetime. SAPCC.
+        if pkcs11 is not None:
+            self.pkcs11 = pkcs11
+        else:
+            self.pkcs11 = self._create_pkcs11_with_retry(ffi)
 
         self._configure_object_cache()
+
+    def _create_pkcs11_with_retry(self, ffi=None):
+        """Call ``_create_pkcs11`` with bounded retries and backoff.
+
+        SAPCC: HSM appliances (especially Thales Luna HA groups behind a
+        network partition) can be transiently unreachable at pod-startup
+        time. Historically a single failure here has caused
+        ``barbican-api`` to enter a crash-loop and every worker in the
+        process to keep the plugin in a permanently-broken state until a
+        human triggered a pod restart. Retrying with exponential backoff
+        turns those transients into a warning + delay instead of an
+        outage.
+        """
+        plugin_conf = self.conf.p11_crypto_plugin
+        attempts = max(1, plugin_conf.plugin_init_retries)
+        delay = max(0.0, plugin_conf.plugin_init_retry_delay)
+        max_delay = max(delay, plugin_conf.plugin_init_retry_max_delay)
+
+        last_exc = None
+        for attempt in range(1, attempts + 1):
+            try:
+                return self._create_pkcs11(ffi)
+            except (exception.P11CryptoTokenException,
+                    exception.P11CryptoPluginException) as exc:
+                last_exc = exc
+                if attempt >= attempts:
+                    LOG.error(
+                        "PKCS#11 plugin init failed on attempt %d/%d: %s. "
+                        "Giving up.",
+                        attempt, attempts, exc,
+                    )
+                    raise
+                LOG.warning(
+                    "PKCS#11 plugin init failed on attempt %d/%d: %s. "
+                    "Retrying in %.1fs...",
+                    attempt, attempts, exc, delay,
+                )
+                if delay > 0:
+                    time.sleep(delay)
+                delay = min(delay * 2 if delay > 0 else 1.0, max_delay)
+        # Not reached; ``raise`` above re-raises on the final attempt.
+        raise last_exc  # pragma: no cover
 
     def get_plugin_name(self):
         return self.conf.p11_crypto_plugin.plugin_name
