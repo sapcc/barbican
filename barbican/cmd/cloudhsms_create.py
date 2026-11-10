@@ -42,11 +42,13 @@ from barbican.common import resources
 from barbican.common import utils
 from barbican.model import models
 from barbican.model import repositories
+from barbican.plugin.crypto import hsm_config_key
 
 CONF = repositories.CONF
 LOG = utils.getLogger(__name__)
 
 _DEFAULT_PKCS11_LIBRARY_PATH = "/opt/hsm/lib/pkcs11.so"
+_DEFAULT_CONFIG_KEY_PATH = "/mnt/secrets/hsm-config-key"
 
 
 def _setup_database():
@@ -216,6 +218,15 @@ def create_hsm_partition(args):
         partition_config = existing_config
     else:
         # Step 7: Create partition config
+        #
+        # Load the HSM config key first and encrypt the CU-PIN before any DB
+        # write. If the key is missing or invalid this fails hard here, so we
+        # never persist a partial row (and never fall back to a plaintext PIN).
+        config_key_path = (
+            getattr(args, "config_key_path", None) or _DEFAULT_CONFIG_KEY_PATH
+        )
+        config_key = hsm_config_key.load_config_key(config_key_path)
+
         LOG.info("[ Step 7 ] Creating HSM partition config...")
         obj = models.HSMPartitionConfig()
         obj.id = getattr(args, "partition_id", None) or str(uuid.uuid4())
@@ -227,7 +238,9 @@ def create_hsm_partition(args):
         obj.slot_id = (
             args.slot_id if getattr(args, "slot_id", None) is not None else 0
         )
-        obj.credentials = {"password": args.password}
+        obj.credentials = hsm_config_key.encrypt_pin(
+            args.password, config_key
+        )
         obj.status = models.States.ACTIVE
         obj.deleted = False
 

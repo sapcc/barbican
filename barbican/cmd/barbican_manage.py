@@ -514,6 +514,17 @@ class SAPCommands(object):
         help="Path to the PKCS11 shared library on this host",
     )
     @args(
+        "--config-key-path",
+        dest="config_key_path",
+        metavar="<config-key-path>",
+        default="/mnt/secrets/hsm-config-key",
+        help=(
+            "Path to the base64 file holding the 32-byte AES-256 HSM config "
+            "key used to encrypt the partition CU-PIN at rest. Barbican never "
+            "generates this key; creation fails if it is missing or invalid."
+        ),
+    )
+    @args(
         "--debug",
         dest="debug",
         action="store_true",
@@ -536,6 +547,7 @@ class SAPCommands(object):
         hmac_label=None,
         secret_store_id=None,
         library_path=None,
+        config_key_path="/mnt/secrets/hsm-config-key",
         debug=False,
     ):
         parsed_args = argparse.Namespace(
@@ -552,6 +564,7 @@ class SAPCommands(object):
             hmac_label=hmac_label,
             secret_store_id=secret_store_id,
             library_path=library_path,
+            config_key_path=config_key_path,
             debug=debug,
         )
         create_hsm_partition(parsed_args)
