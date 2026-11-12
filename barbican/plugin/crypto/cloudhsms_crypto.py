@@ -394,8 +394,8 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
     def _configure_pkcs11(self, project_id):
         """Configure PKCS11 for the specified project if needed."""
 
-        LOG.debug(
-            "Configuring PKCS11 for project %s (current: %s, pkcs11: %s)",
+        LOG.info(
+            "_configure_pkcs11 START project=%s current=%s pkcs11_set=%s",
             project_id, self.current_project_id,
             self.pkcs11 is not None,
         )
@@ -450,17 +450,20 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         ):
             container_id = int(container_id)
             cfg_path = self._generate_utimaco_cfg(container_id, device_ip)
-            os.environ["CS_PKCS11_R3_CFG"] = cfg_path
             LOG.info(
-                "Set CS_PKCS11_R3_CFG=%s (device=%s, port=%d)",
-                cfg_path, device_ip, container_id + 4000,
+                "_configure_pkcs11 wrote cfg path=%s device=%s port=%d "
+                "for project=%s",
+                cfg_path, device_ip, container_id + 4000, project_id,
             )
 
         # Create new PKCS11 instance
         LOG.debug("Creating new PKCS11 instance")
         self.pkcs11 = self._create_pkcs11(None)
         self._configure_object_cache()
-        LOG.debug("PKCS11 configured successfully for project %s", project_id)
+        LOG.info(
+            "_configure_pkcs11 END project=%s slot_id=%s",
+            project_id, getattr(self.pkcs11, "slot_id", None),
+        )
 
     def get_plugin_name(self):
         """Gets user-friendly plugin name."""
@@ -513,13 +516,3 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         return super(HSMPartitionCryptoPlugin, self).generate_symmetric(
             generate_dto, kek_meta_dto, project_id
         )
-
-
-class UtimacocHSMCryptoPlugin(HSMPartitionCryptoPlugin):
-    """Utimaco cHSM-specific subclass of HSMPartitionCryptoPlugin."""
-    pass
-
-
-class ThalesPartitionCryptoPlugin(HSMPartitionCryptoPlugin):
-    """Thales partition-specific subclass of HSMPartitionCryptoPlugin."""
-    pass
