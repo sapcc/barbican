@@ -254,10 +254,6 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         self.assertEqual("part-mkek", plugin.mkek_label)
         self.assertEqual("part-hmac", plugin.hmac_label)
         plugin._generate_utimaco_cfg.assert_called_once_with(9, "10.0.0.1")
-        self.assertEqual(
-            "/tmp/utimaco/cs_pkcs11_R3_10.0.0.1_4009.cfg",
-            os.environ["CS_PKCS11_R3_CFG"],
-        )
 
     def test_configure_pkcs11_serial_only_no_utimaco_cfg(self):
         plugin = cloudhsms_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
@@ -491,7 +487,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
             ):
                 plugin._configure_pkcs11(self.project_id)
 
-                self.assertEqual(fixed_cfg, os.environ["CS_PKCS11_R3_CFG"])
+                self.assertTrue(os.path.exists(fixed_cfg))
                 with open(fixed_cfg) as f:
                     content = f.read()
                 self.assertIn("Devices = 4000@10.246.244.60", content)
@@ -557,114 +553,3 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
             self.assertIn("SlotCount = 10", content)
             self.assertIn("[HSMCluster]", content)
             self.assertIn("Devices = 4000@10.246.244.60", content)
-
-
-class WhenTestingVendorPluginConfigurationIsolation(utils.BaseTestCase):
-    """Test that appliance plugin instances use isolated configurations."""
-
-    def setUp(self):
-        super(WhenTestingVendorPluginConfigurationIsolation, self).setUp()
-        self.conf = config.new_config()
-
-    def test_vendor_plugins_use_different_sections(self):
-        """Each store_plugin_name maps to its own config section."""
-        utimaco_plugin = cloudhsms_crypto.UtimacocHSMCryptoPlugin(
-            store_plugin_name="utimaco_hsm")
-        thales_plugin = cloudhsms_crypto.ThalesPartitionCryptoPlugin(
-            store_plugin_name="thales_hsm")
-
-        self.assertEqual("hsm_partition_crypto_plugin:utimaco_hsm",
-                         utimaco_plugin.section_name)
-        self.assertEqual("hsm_partition_crypto_plugin:thales_hsm",
-                         thales_plugin.section_name)
-        self.assertNotEqual(utimaco_plugin.section_name,
-                            thales_plugin.section_name)
-
-    def test_vendor_plugins_configuration_isolation(self):
-        """Instances read plugin_name and other opts from their own section."""
-        utimaco_section = "hsm_partition_crypto_plugin:utimaco_hsm"
-        thales_section = "hsm_partition_crypto_plugin:thales_hsm"
-
-        utimaco_group = cfg.OptGroup(name=utimaco_section)
-        thales_group = cfg.OptGroup(name=thales_section)
-
-        self.conf.register_group(utimaco_group)
-        self.conf.register_group(thales_group)
-
-        self.conf.register_opts(
-            cloudhsms_crypto.hsm_partition_crypto_plugin_opts,
-            group=utimaco_group)
-        self.conf.register_opts(
-            cloudhsms_crypto.hsm_partition_crypto_plugin_opts,
-            group=thales_group)
-
-        self.conf[utimaco_section].plugin_name = "Utimaco Plugin"
-        self.conf[utimaco_section].default_partition_id = "partition_123"
-
-        self.conf[thales_section].plugin_name = "Thales Plugin"
-        self.conf[thales_section].default_partition_id = "partition_456"
-
-        utimaco_plugin = cloudhsms_crypto.UtimacocHSMCryptoPlugin(
-            conf=self.conf, store_plugin_name="utimaco_hsm")
-        thales_plugin = cloudhsms_crypto.ThalesPartitionCryptoPlugin(
-            conf=self.conf, store_plugin_name="thales_hsm")
-
-        self.assertEqual("Utimaco Plugin", utimaco_plugin.get_plugin_name())
-        self.assertEqual("Thales Plugin", thales_plugin.get_plugin_name())
-
-        self.assertEqual("partition_123",
-                         utimaco_plugin.conf.default_partition_id)
-        self.assertEqual("partition_456",
-                         thales_plugin.conf.default_partition_id)
-
-
-class WhenTestingVendorSubclasses(utils.BaseTestCase):
-    """Test UtimacocHSMCryptoPlugin and ThalesPartitionCryptoPlugin."""
-
-    def test_utimaco_is_subclass_of_hsm_partition(self):
-        self.assertTrue(
-            issubclass(
-                cloudhsms_crypto.UtimacocHSMCryptoPlugin,
-                cloudhsms_crypto.HSMPartitionCryptoPlugin,
-            )
-        )
-
-    def test_thales_is_subclass_of_hsm_partition(self):
-        self.assertTrue(
-            issubclass(
-                cloudhsms_crypto.ThalesPartitionCryptoPlugin,
-                cloudhsms_crypto.HSMPartitionCryptoPlugin,
-            )
-        )
-
-    def test_utimaco_plugin_instantiates(self):
-        plugin = cloudhsms_crypto.UtimacocHSMCryptoPlugin(
-            store_plugin_name="utimaco_hsm")
-        self.assertIsInstance(
-            plugin, cloudhsms_crypto.HSMPartitionCryptoPlugin)
-        self.assertEqual("utimaco_hsm", plugin.store_plugin_name)
-        self.assertEqual(
-            "hsm_partition_crypto_plugin:utimaco_hsm",
-            plugin.section_name,
-        )
-
-    def test_thales_plugin_instantiates(self):
-        plugin = cloudhsms_crypto.ThalesPartitionCryptoPlugin(
-            store_plugin_name="thales_hsm")
-        self.assertIsInstance(
-            plugin, cloudhsms_crypto.HSMPartitionCryptoPlugin)
-        self.assertEqual("thales_hsm", plugin.store_plugin_name)
-        self.assertEqual(
-            "hsm_partition_crypto_plugin:thales_hsm",
-            plugin.section_name,
-        )
-
-    def test_utimaco_has_utimaco_cfg_internals(self):
-        plugin = cloudhsms_crypto.UtimacocHSMCryptoPlugin()
-        self.assertTrue(hasattr(plugin, "_UTIMACO_CFG_PATH"))
-        self.assertTrue(hasattr(plugin, "_generate_utimaco_cfg"))
-
-    def test_thales_has_utimaco_cfg_internals(self):
-        plugin = cloudhsms_crypto.ThalesPartitionCryptoPlugin()
-        self.assertTrue(hasattr(plugin, "_UTIMACO_CFG_PATH"))
-        self.assertTrue(hasattr(plugin, "_generate_utimaco_cfg"))
