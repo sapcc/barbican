@@ -400,34 +400,28 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
             self.pkcs11 is not None,
         )
 
-        # If we're already configured for this project, do nothing
         if project_id == self.current_project_id and self.pkcs11 is not None:
             LOG.debug("Already configured for project %s, skipping",
                       project_id)
             return
 
-        # Get partition config for the project
         partition = self._get_partition_for_project(project_id)
+        metadata = partition.partition_metadata or {}
 
-        # Store current project and partition
         self.current_project_id = project_id
         self.current_partition = partition
         self.login = partition.credentials["password"]
-
-        # Utimaco containers use token serial number; otherwise fall
-        # back to token label / slot id so legacy partitions keep working.
-        metadata = partition.partition_metadata or {}
         self.token_serial_number = metadata.get("token_serial_number")
-        slot_id = int(partition.slot_id)
+        # Utimaco containers resolve via token serial; others fall back to
+        # token label / slot id so legacy partitions keep working.
         if self.token_serial_number:
             self.slot_id = None
             self.token_labels = None
         else:
-            self.slot_id = slot_id
+            self.slot_id = int(partition.slot_id)
             self.token_labels = (
                 [partition.token_label] if partition.token_label else None
             )
-
         # Per-partition MKEK/HMAC label overrides. Fall back to the
         # config-section defaults when the partition record is silent.
         self.mkek_label = metadata.get("mkek_label") or self.conf.mkek_label
@@ -443,11 +437,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
 
         device_ip = metadata.get("device_ip")
         container_id = metadata.get("container_id")
-        if (
-            device_ip
-            and container_id is not None
-            and self.token_serial_number
-        ):
+        if device_ip and container_id is not None and self.token_serial_number:
             container_id = int(container_id)
             cfg_path = self._generate_utimaco_cfg(container_id, device_ip)
             LOG.info(
@@ -456,8 +446,15 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
                 cfg_path, device_ip, container_id + 4000, project_id,
             )
 
-        # Create new PKCS11 instance
-        LOG.debug("Creating new PKCS11 instance")
+        # Finalize the existing library before re-init. Without this, the
+        # next C_Initialize returns 0x191 (CKR_CRYPTOKI_ALREADY_INITIALIZED,
+        # silently tolerated) and the library stays bound to the previous
+        # device, so _get_slot_id can't find the new partition's serial.
+        if self.pkcs11 is not None:
+            LOG.info("_configure_pkcs11 finalizing before re-init")
+            self.pkcs11.finalize()
+            self.pkcs11 = None
+
         self.pkcs11 = self._create_pkcs11(None)
         self._configure_object_cache()
         LOG.info(
