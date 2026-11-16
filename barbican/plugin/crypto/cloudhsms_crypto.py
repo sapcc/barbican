@@ -23,6 +23,7 @@ from barbican.common import exception
 from barbican.common import utils
 from barbican import i18n as u
 from barbican.model import repositories
+from barbican.plugin.crypto import hsm_config_key
 from barbican.plugin.crypto import p11_crypto
 
 LOG = utils.getLogger(__name__)
@@ -171,6 +172,15 @@ hsm_partition_crypto_plugin_opts = [
         ),
         default=False,
     ),
+    cfg.StrOpt(
+        "config_key_path",
+        default="/mnt/secrets/hsm-config-key",
+        help=u._(
+            "Path to the base64 file holding the 32-byte AES-256 HSM config "
+            "key used to decrypt the partition CU-PIN at rest. Barbican never "
+            "generates this key; login fails if it is missing or invalid."
+        ),
+    ),
 ]
 
 
@@ -309,6 +319,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         self.key_wrap_mechanism = self.conf.key_wrap_mechanism
         self.key_wrap_gen_iv = self.conf.key_wrap_generate_iv
         self.os_locking_ok = self.conf.os_locking_ok
+        self.config_key_path = self.conf.config_key_path
         self.pkek_length = self.conf.pkek_length
         self.pkek_cache_ttl = self.conf.pkek_cache_ttl
         self.pkek_cache_limit = self.conf.pkek_cache_limit
@@ -391,6 +402,19 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         )
         return cfg_path
 
+    def _decrypt_pin(self, credentials):
+        """Decrypt the stored CU-PIN envelope; fail hard, no fallback.
+
+        Loads the mounted HSM config key and decrypts the {v, alg, nonce,
+        ciphertext} envelope. A missing/invalid key (HSMConfigKeyError) or a
+        GCM tag mismatch / malformed envelope (HSMCredentialDecryptionError)
+        propagates so the plugin refuses HSM login rather than proceeding with
+        a bad PIN. A legacy plaintext {"password": ...} row has no envelope
+        version and is rejected as malformed by decrypt_pin.
+        """
+        key = hsm_config_key.load_config_key(self.config_key_path)
+        return hsm_config_key.decrypt_pin(credentials, key)
+
     def _configure_pkcs11(self, project_id):
         """Configure PKCS11 for the specified project if needed."""
 
@@ -410,7 +434,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
 
         self.current_project_id = project_id
         self.current_partition = partition
-        self.login = partition.credentials["password"]
+        self.login = self._decrypt_pin(partition.credentials)
         self.token_serial_number = metadata.get("token_serial_number")
         # Utimaco containers resolve via token serial; others fall back to
         # token label / slot id so legacy partitions keep working.
