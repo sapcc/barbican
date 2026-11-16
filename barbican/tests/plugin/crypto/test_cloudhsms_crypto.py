@@ -13,7 +13,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import base64
 import os
+import tempfile
 import threading
 from unittest import mock
 
@@ -25,6 +27,7 @@ from barbican.model.models import KEKDatum
 from barbican.plugin.crypto.base import KEKMetaDTO
 from barbican.plugin.crypto.base import ResponseDTO
 from barbican.plugin.crypto import cloudhsms_crypto
+from barbican.plugin.crypto import hsm_config_key
 from barbican.plugin.crypto import p11_crypto
 from barbican.tests import utils
 from oslo_config import cfg
@@ -87,6 +90,24 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
             self.partition_id
         )
         self.conf.hsm_partition_crypto_plugin.library_path = self.library_path
+
+        # HSM config key fixture: write a base64 32-byte key to a temp file
+        # and build the encrypted CU-PIN envelope the plugin decrypts at
+        # login. Tests pass this envelope as the partition credentials.
+        self.config_key = b"\x02" * hsm_config_key.KEY_LEN
+        key_file = tempfile.NamedTemporaryFile(
+            mode="wb", suffix=".key", delete=False, prefix="hsm_cfg_key_"
+        )
+        key_file.write(base64.b64encode(self.config_key))
+        key_file.close()
+        self.config_key_path = key_file.name
+        self.addCleanup(os.unlink, self.config_key_path)
+        self.conf.hsm_partition_crypto_plugin.config_key_path = (
+            self.config_key_path
+        )
+        self.login_envelope = hsm_config_key.encrypt_pin(
+            self.login, self.config_key
+        )
 
     def test_init_with_global_conf(self):
         store_plugin_name = "default"
@@ -205,10 +226,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
             project_id=self.project_id,
             slot_id=self.slot_id,
             token_label=self.token_label,
-            credentials={
-                "library_path": self.library_path,
-                "password": self.login
-            },
+            credentials=self.login_envelope,
         )
         plugin._create_pkcs11 = mock.MagicMock()
         plugin._create_pkcs11.return_value = self.pkcs11
@@ -224,6 +242,76 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         self.assertNotIn("CS_PKCS11_R3_CFG", os.environ)
         self.assertEqual(1, plugin._create_pkcs11.call_count)
 
+    def _partition_with_credentials(self, credentials):
+        """Build a partition whose credentials drive the decrypt-on-read path.
+
+        Mirrors the fixtures used by the other _configure_pkcs11 tests but
+        lets each decrypt test supply its own credentials payload (a valid
+        envelope, a tampered one, or a legacy plaintext dict).
+        """
+        plugin = cloudhsms_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
+        plugin._get_partition_for_project = mock.MagicMock(
+            return_value=HSMPartitionConfig(
+                project_id=self.project_id,
+                slot_id=self.slot_id,
+                token_label=self.token_label,
+                credentials=credentials,
+            )
+        )
+        plugin._create_pkcs11 = mock.MagicMock(return_value=self.pkcs11)
+        return plugin
+
+    def test_configure_pkcs11_decrypts_envelope(self):
+        # The CU-PIN is stored as an AES-256-GCM envelope; the plugin must
+        # decrypt it with the mounted config key and recover the plaintext.
+        plugin = self._partition_with_credentials(self.login_envelope)
+
+        os.environ.pop("CS_PKCS11_R3_CFG", None)
+        plugin._configure_pkcs11(self.project_id)
+
+        self.assertEqual(self.login, plugin.login)
+        self.assertEqual(1, plugin._create_pkcs11.call_count)
+
+    def test_configure_pkcs11_refuses_tampered_envelope(self):
+        # Flipping a ciphertext byte must fail the GCM tag check and the
+        # plugin must refuse HSM login rather than proceed with a bad PIN.
+        tampered = dict(self.login_envelope)
+        raw = bytearray(base64.b64decode(tampered["ciphertext"]))
+        raw[0] ^= 0x01
+        tampered["ciphertext"] = base64.b64encode(bytes(raw)).decode("ascii")
+        plugin = self._partition_with_credentials(tampered)
+
+        self.assertRaises(
+            hsm_config_key.HSMCredentialDecryptionError,
+            plugin._configure_pkcs11, self.project_id,
+        )
+        self.assertEqual(0, plugin._create_pkcs11.call_count)
+
+    def test_configure_pkcs11_fails_hard_without_config_key(self):
+        # A missing config key must fail hard (never fall back to a
+        # self-generated key or a plaintext PIN).
+        self.conf.hsm_partition_crypto_plugin.config_key_path = (
+            self.config_key_path + ".missing"
+        )
+        plugin = self._partition_with_credentials(self.login_envelope)
+
+        self.assertRaises(
+            hsm_config_key.HSMConfigKeyError,
+            plugin._configure_pkcs11, self.project_id,
+        )
+        self.assertEqual(0, plugin._create_pkcs11.call_count)
+
+    def test_configure_pkcs11_rejects_legacy_plaintext(self):
+        # Encrypted-only policy: a legacy plaintext {"password": ...} row has
+        # no envelope version and must be rejected as malformed, not used.
+        plugin = self._partition_with_credentials({"password": self.login})
+
+        self.assertRaises(
+            hsm_config_key.HSMCredentialDecryptionError,
+            plugin._configure_pkcs11, self.project_id,
+        )
+        self.assertEqual(0, plugin._create_pkcs11.call_count)
+
     def test_configure_pkcs11_utimaco_metadata(self):
         plugin = cloudhsms_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
         plugin._get_partition_for_project = mock.MagicMock()
@@ -231,7 +319,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
             project_id=self.project_id,
             slot_id="0",
             token_label="",
-            credentials={"password": self.login},
+            credentials=self.login_envelope,
             partition_metadata={
                 "device_ip": "10.0.0.1",
                 "container_id": 9,
@@ -262,7 +350,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
             project_id=self.project_id,
             slot_id=self.slot_id,
             token_label=self.token_label,
-            credentials={"password": self.login},
+            credentials=self.login_envelope,
             partition_metadata={"token_serial_number": "serial-xyz"},
         )
         plugin._create_pkcs11 = mock.MagicMock(return_value=self.pkcs11)
@@ -464,10 +552,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
             project_id=self.project_id,
             slot_id="0",
             token_label=self.token_label,
-            credentials={
-                "library_path": self.library_path,
-                "password": self.login
-            },
+            credentials=self.login_envelope,
             partition_metadata={
                 "device_ip": "10.246.244.60",
                 "container_id": 0,
@@ -499,10 +584,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
             project_id=self.project_id,
             slot_id=self.slot_id,
             token_label=self.token_label,
-            credentials={
-                "library_path": self.library_path,
-                "password": self.login
-            },
+            credentials=self.login_envelope,
             partition_metadata=None,
         )
         plugin._create_pkcs11 = mock.MagicMock()
@@ -519,10 +601,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
             project_id=self.project_id,
             slot_id=self.slot_id,
             token_label=self.token_label,
-            credentials={
-                "library_path": self.library_path,
-                "password": self.login
-            },
+            credentials=self.login_envelope,
             partition_metadata={},
         )
         plugin._create_pkcs11 = mock.MagicMock()
