@@ -23,11 +23,11 @@ import re
 from oslo_serialization import jsonutils as json
 from oslo_utils import timeutils
 import sqlalchemy as sa
+from sqlalchemy import event
 from sqlalchemy.ext import compiler
 from sqlalchemy.ext import declarative
 from sqlalchemy import orm
 from sqlalchemy.orm import collections as col
-from sqlalchemy.sql.schema import UniqueConstraint
 from sqlalchemy import types as sql_types
 
 from barbican.common import exception
@@ -1748,6 +1748,12 @@ class ProjectTokenConfig(BASE, ModelBase):
 
     __tablename__ = "project_token_configs"
 
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "project_id", name="_project_token_config_project_uc"
+        ),
+    )
+
     _VENDOR_TYPES = frozenset({"utimaco", "thales"})
 
     # Link to project
@@ -1817,7 +1823,9 @@ class ProjectTokenConfig(BASE, ModelBase):
     def _validate_vendor_type(self, key, value):
         if value not in self._VENDOR_TYPES:
             raise exception.Invalid(
-                u._("vendor_type must be one of {allowed}, got {value!r}").format(
+                u._(
+                    "vendor_type must be one of {allowed}, got {value!r}"
+                ).format(
                     allowed=sorted(self._VENDOR_TYPES), value=value,
                 )
             )
@@ -1861,19 +1869,18 @@ class ProjectTokenConfig(BASE, ModelBase):
             seen_orders.add(order)
         return value
 
-    @orm.validates("token_serial_number", "slot_id", "token_label")
-    def _validate_token_identifier(self, key, value):
-        # At least one of these must be set so the plugin can resolve a slot.
-        others = {"token_serial_number", "slot_id", "token_label"} - {key}
-        any_other_set = any(getattr(self, name, None) for name in others)
-        if value in (None, "") and not any_other_set:
+    def check_token_identifier(self):
+        if not any([
+            self.token_serial_number,
+            self.slot_id,
+            self.token_label,
+        ]):
             raise exception.Invalid(
                 u._(
                     "at least one of token_serial_number, slot_id, or "
                     "token_label must be set"
                 )
             )
-        return value
 
     # Transitional shim so the untouched plugin code keeps working until
     @property
@@ -1883,6 +1890,12 @@ class ProjectTokenConfig(BASE, ModelBase):
     @partition_metadata.setter
     def partition_metadata(self, value):
         self.vendor_metadata = value
+
+
+@event.listens_for(ProjectTokenConfig, "before_insert")
+@event.listens_for(ProjectTokenConfig, "before_update")
+def validate_project_token_config(mapper, connection, target):
+    target.check_token_identifier()
 
 
 class SecretConsumerMetadatum(BASE, SoftDeleteMixIn, ModelBase):

@@ -2545,10 +2545,10 @@ class ProjectTokenConfigRepo(BaseRepo):
         session = self.get_session(session)
         start = time.time()  # DEBUG
 
-        # Enforce one active (non-deleted) token config per project.
+        # Enforce one token config per project.
         existing = (
             session.query(models.ProjectTokenConfig)
-            .filter_by(project_id=entity.project_id, deleted=False)
+            .filter_by(project_id=entity.project_id)
             .first()
         )
         if existing is not None and existing.id != entity.id:
