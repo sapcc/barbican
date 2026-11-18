@@ -20,8 +20,9 @@ from unittest import mock
 from barbican.common import config
 from barbican.common import exception
 from barbican import i18n as u
-from barbican.model.models import HSMPartitionConfig
+
 from barbican.model.models import KEKDatum
+from barbican.model.models import ProjectTokenConfig
 from barbican.plugin.crypto.base import KEKMetaDTO
 from barbican.plugin.crypto.base import ResponseDTO
 from barbican.plugin.crypto import cloudhsms_crypto
@@ -132,9 +133,9 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
         plugin = cloudhsms_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
 
         plugin.project_hsm_repo = mock.MagicMock()
-        plugin.hsm_partition_config_repo = mock.MagicMock()
-        plugin.hsm_partition_config_repo.get_by_project_id.return_value = (
-            HSMPartitionConfig(
+        plugin.project_token_config_repo = mock.MagicMock()
+        plugin.project_token_config_repo.get_by_project_id.return_value = (
+            ProjectTokenConfig(
                 project_id=self.project_id,
                 slot_id=self.slot_id,
                 token_label=self.token_label,
@@ -149,9 +150,9 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
     def test_get_partition_for_default_mapping(self):
         plugin = cloudhsms_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
 
-        plugin.hsm_partition_config_repo = mock.MagicMock()
-        plugin.hsm_partition_config_repo.get_by_project_id.return_value = (
-            HSMPartitionConfig(
+        plugin.project_token_config_repo = mock.MagicMock()
+        plugin.project_token_config_repo.get_by_project_id.return_value = (
+            ProjectTokenConfig(
                 project_id=self.project_id,
                 slot_id=self.slot_id,
                 token_label=self.token_label,
@@ -166,10 +167,10 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
     def test_get_partition_raises_error_for_no_mapping(self):
         plugin = cloudhsms_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
 
-        plugin.hsm_partition_config_repo = mock.MagicMock()
-        plugin.hsm_partition_config_repo.get_by_project_id.side_effect = (
+        plugin.project_token_config_repo = mock.MagicMock()
+        plugin.project_token_config_repo.get_by_project_id.side_effect = (
             exception.NotFound("Partition not found"))
-        plugin.hsm_partition_config_repo.get.side_effect = exception.NotFound(
+        plugin.project_token_config_repo.get.side_effect = exception.NotFound(
             "Partition not found")
 
         self.assertRaises(ValueError, plugin._get_partition_for_project,
@@ -189,10 +190,10 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
 
     def test_configure_pkcs11_raises_error_for_no_partition_mapping(self):
         plugin = cloudhsms_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
-        plugin.hsm_partition_config_repo = mock.MagicMock()
-        plugin.hsm_partition_config_repo.get_by_project_id.side_effect = (
+        plugin.project_token_config_repo = mock.MagicMock()
+        plugin.project_token_config_repo.get_by_project_id.side_effect = (
             exception.NotFound("Partition not found"))
-        plugin.hsm_partition_config_repo.get.side_effect = exception.NotFound(
+        plugin.project_token_config_repo.get.side_effect = exception.NotFound(
             "Partition not found")
 
         self.assertRaises(ValueError, plugin._configure_pkcs11,
@@ -201,7 +202,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
     def test_configure_pkcs11(self):
         plugin = cloudhsms_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
         plugin._get_partition_for_project = mock.MagicMock()
-        plugin._get_partition_for_project.return_value = HSMPartitionConfig(
+        plugin._get_partition_for_project.return_value = ProjectTokenConfig(
             project_id=self.project_id,
             slot_id=self.slot_id,
             token_label=self.token_label,
@@ -227,12 +228,12 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
     def test_configure_pkcs11_utimaco_metadata(self):
         plugin = cloudhsms_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
         plugin._get_partition_for_project = mock.MagicMock()
-        plugin._get_partition_for_project.return_value = HSMPartitionConfig(
+        plugin._get_partition_for_project.return_value = ProjectTokenConfig(
             project_id=self.project_id,
             slot_id="0",
             token_label="",
             credentials={"password": self.login},
-            partition_metadata={
+            vendor_metadata={
                 "device_ip": "10.0.0.1",
                 "container_id": 9,
                 "token_serial_number": "016df7f4be_0001",
@@ -258,12 +259,12 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
     def test_configure_pkcs11_serial_only_no_utimaco_cfg(self):
         plugin = cloudhsms_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
         plugin._get_partition_for_project = mock.MagicMock()
-        plugin._get_partition_for_project.return_value = HSMPartitionConfig(
+        plugin._get_partition_for_project.return_value = ProjectTokenConfig(
             project_id=self.project_id,
             slot_id=self.slot_id,
             token_label=self.token_label,
             credentials={"password": self.login},
-            partition_metadata={"token_serial_number": "serial-xyz"},
+            vendor_metadata={"token_serial_number": "serial-xyz"},
         )
         plugin._create_pkcs11 = mock.MagicMock(return_value=self.pkcs11)
         plugin._generate_utimaco_cfg = mock.MagicMock()
@@ -460,7 +461,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
     def test_configure_pkcs11_with_device_ip(self):
         plugin = cloudhsms_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
         plugin._get_partition_for_project = mock.MagicMock()
-        plugin._get_partition_for_project.return_value = HSMPartitionConfig(
+        plugin._get_partition_for_project.return_value = ProjectTokenConfig(
             project_id=self.project_id,
             slot_id="0",
             token_label=self.token_label,
@@ -468,7 +469,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
                 "library_path": self.library_path,
                 "password": self.login
             },
-            partition_metadata={
+            vendor_metadata={
                 "device_ip": "10.246.244.60",
                 "container_id": 0,
                 "token_serial_number": "016df7f4be_0001",
@@ -495,7 +496,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
     def test_configure_pkcs11_without_device_ip(self):
         plugin = cloudhsms_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
         plugin._get_partition_for_project = mock.MagicMock()
-        plugin._get_partition_for_project.return_value = HSMPartitionConfig(
+        plugin._get_partition_for_project.return_value = ProjectTokenConfig(
             project_id=self.project_id,
             slot_id=self.slot_id,
             token_label=self.token_label,
@@ -503,7 +504,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
                 "library_path": self.library_path,
                 "password": self.login
             },
-            partition_metadata=None,
+            vendor_metadata=None,
         )
         plugin._create_pkcs11 = mock.MagicMock()
         plugin._create_pkcs11.return_value = self.pkcs11
@@ -515,7 +516,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
     def test_configure_pkcs11_with_empty_metadata(self):
         plugin = cloudhsms_crypto.HSMPartitionCryptoPlugin(conf=self.conf)
         plugin._get_partition_for_project = mock.MagicMock()
-        plugin._get_partition_for_project.return_value = HSMPartitionConfig(
+        plugin._get_partition_for_project.return_value = ProjectTokenConfig(
             project_id=self.project_id,
             slot_id=self.slot_id,
             token_label=self.token_label,
@@ -523,7 +524,7 @@ class WhenTestingHSMPartitionCryptoPlugin(utils.BaseTestCase):
                 "library_path": self.library_path,
                 "password": self.login
             },
-            partition_metadata={},
+            vendor_metadata={},
         )
         plugin._create_pkcs11 = mock.MagicMock()
         plugin._create_pkcs11.return_value = self.pkcs11

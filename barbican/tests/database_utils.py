@@ -255,6 +255,34 @@ def create_project_quotas(project=None, parsed_project_quotas=None,
     return project_quota
 
 
+def create_project_token_config(project=None, slot_id="0",
+                                token_label="token",
+                                vendor_type="utimaco",
+                                endpoints=None,
+                                mkek_label="mkek",
+                                hmac_label="hmac",
+                                token_serial_number=None,
+                                vendor_metadata=None,
+                                credentials=None, session=None):
+    if endpoints is None:
+        endpoints = [{"host": "127.0.0.1", "port": 4001, "order": 0}]
+    project_token_config = models.ProjectTokenConfig(
+        project_id=project.id,
+        slot_id=slot_id,
+        token_label=token_label,
+        vendor_type=vendor_type,
+        endpoints=endpoints,
+        mkek_label=mkek_label,
+        hmac_label=hmac_label,
+        token_serial_number=token_serial_number,
+        vendor_metadata=vendor_metadata,
+        credentials=credentials or {"user": "cu", "password": "secret"})
+    project_token_config.status = models.States.ACTIVE
+    repo = repositories.get_project_token_config_repository()
+    repo.create_from(project_token_config, session=session)
+    return project_token_config
+
+
 def create_acl_secret(secret=None, user_ids=[], session=None):
     acl_secret = models.SecretACL(secret.id, "read")
     acl_secret.secret_id = secret.id
