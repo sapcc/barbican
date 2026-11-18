@@ -202,22 +202,22 @@ def create_hsm_partition(args):
     project = resources.get_or_create_project(args.external_project_id)
     LOG.debug("Barbican project id: %s", project.id)
 
-    # Step 6: Check if partition config already exists
-    hsm_partition_config_repo = (
-        repositories.get_hsm_partition_config_repository()
+    # Step 6: Check if token config already exists
+    project_token_config_repo = (
+        repositories.get_project_token_config_repository()
     )
-    existing_config = hsm_partition_config_repo.get_by_project_id(
+    existing_config = project_token_config_repo.get_by_project_id(
         project.id, suppress_exception=True
     )
 
     if existing_config:
         LOG.info(
-            "[ Step 6-7 ] HSM partition config already exists (%s), skipping",
+            "[ Step 6-7 ] Project token config already exists (%s), skipping",
             existing_config.id,
         )
         partition_config = existing_config
     else:
-        # Step 7: Create partition config
+        # Step 7: Create token config
         #
         # Load the HSM config key first and encrypt the CU-PIN before any DB
         # write. If the key is missing or invalid this fails hard here, so we
@@ -227,40 +227,59 @@ def create_hsm_partition(args):
         )
         config_key = hsm_config_key.load_config_key(config_key_path)
 
-        LOG.info("[ Step 7 ] Creating HSM partition config...")
-        obj = models.HSMPartitionConfig()
+        LOG.info("[ Step 7 ] Creating project token config...")
+        obj = models.ProjectTokenConfig()
         obj.id = getattr(args, "partition_id", None) or str(uuid.uuid4())
         obj.created_at = timeutils.utcnow()
         obj.updated_at = timeutils.utcnow()
         obj.project_id = project.id
-        obj.partition_label = getattr(args, "partition_label", None) or ""
-        obj.token_label = getattr(args, "token_label", None) or ""
-        obj.slot_id = (
-            args.slot_id if getattr(args, "slot_id", None) is not None else 0
-        )
         obj.credentials = hsm_config_key.encrypt_pin(
             args.password, config_key
         )
         obj.status = models.States.ACTIVE
         obj.deleted = False
 
-        metadata = {}
-        for field in ("device_ip", "token_serial_number", "container_id",
-                      "mkek_label", "hmac_label"):
-            val = getattr(args, field, None)
-            if val is not None:
-                metadata[field] = val
-        if metadata:
-            obj.partition_metadata = metadata
+        # Task 1 bridge: this CLI is Utimaco-only today. Task 3 rewrites the
+        # whole flow with per-vendor validators + repeatable --endpoint args.
+        obj.vendor_type = "utimaco"
+        obj.mkek_label = getattr(args, "mkek_label", None) or ""
+        obj.hmac_label = getattr(args, "hmac_label", None) or ""
+        # Set token_serial_number first so the cross-field validator on
+        # slot_id / token_label has at least one identifier to see.
+        obj.token_serial_number = getattr(args, "token_serial_number", None)
+        obj.token_label = getattr(args, "token_label", None)
+        slot = getattr(args, "slot_id", None)
+        obj.slot_id = str(slot) if slot is not None else None
+
+        device_ip = getattr(args, "device_ip", None)
+        container_id = getattr(args, "container_id", None)
+        if device_ip and container_id is not None:
+            obj.endpoints = [
+                {
+                    "host": device_ip,
+                    "port": 4000 + int(container_id),
+                    "order": 0,
+                }
+            ]
+        else:
+            obj.endpoints = []
+
+        vendor_metadata = {}
+        if container_id is not None:
+            vendor_metadata["container_id"] = container_id
+        if device_ip:
+            vendor_metadata["device_ip"] = device_ip
+        if vendor_metadata:
+            obj.vendor_metadata = vendor_metadata
 
         try:
-            partition_config = hsm_partition_config_repo.create_from(obj)
+            partition_config = project_token_config_repo.create_from(obj)
             repositories.commit()
         except Exception:
             repositories.rollback()
             raise
 
-        LOG.info("Created HSM partition config %s", partition_config.id)
+        LOG.info("Created project token config %s", partition_config.id)
 
     # Step 8: Look up target secret store
     store_id = getattr(args, "secret_store_id", None)
