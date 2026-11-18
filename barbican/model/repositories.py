@@ -58,7 +58,7 @@ _CONTAINER_CONSUMER_REPOSITORY = None
 _CONTAINER_REPOSITORY = None
 _CONTAINER_SECRET_REPOSITORY = None
 _ENCRYPTED_DATUM_REPOSITORY = None
-_HSM_PARTITION_CONFIG_REPOSITORY = None
+_PROJECT_TOKEN_CONFIG_REPOSITORY = None
 _KEK_DATUM_REPOSITORY = None
 _ORDER_PLUGIN_META_REPOSITORY = None
 _ORDER_BARBICAN_META_REPOSITORY = None
@@ -2520,16 +2520,18 @@ class ProjectSecretStoreRepo(BaseRepo):
             project_id=project_id)
 
 
-class HSMPartitionConfigRepo(BaseRepo):
-    """Repository for HSM partition configurations."""
+class ProjectTokenConfigRepo(BaseRepo):
+    """Repository for per-project HSM token configurations."""
 
     def _do_entity_name(self):
         """Sub-class hook: return entity name, such as for debugging."""
-        return "HSMPartitionConfig"
+        return "ProjectTokenConfig"
 
     def _do_build_get_query(self, entity_id, external_project_id, session):
         """Sub-class hook: build a retrieve query."""
-        return session.query(models.HSMPartitionConfig).filter_by(id=entity_id)
+        return session.query(models.ProjectTokenConfig).filter_by(
+            id=entity_id
+        )
 
     def create_from(self, entity, session=None):
         """Sub-class hook: create from entity."""
@@ -2542,6 +2544,20 @@ class HSMPartitionConfigRepo(BaseRepo):
         LOG.debug("Begin create from...")
         session = self.get_session(session)
         start = time.time()  # DEBUG
+
+        # Enforce one active (non-deleted) token config per project.
+        existing = (
+            session.query(models.ProjectTokenConfig)
+            .filter_by(project_id=entity.project_id, deleted=False)
+            .first()
+        )
+        if existing is not None and existing.id != entity.id:
+            raise exception.ConstraintCheck(
+                error=(
+                    "An active token config already exists for "
+                    f"project_id={entity.project_id}"
+                )
+            )
 
         # Validate the attributes before we go any further. From my
         # (unknown Glance developer) investigation, the @validates
@@ -2568,18 +2584,18 @@ class HSMPartitionConfigRepo(BaseRepo):
     def get_by_project_id(
         self, project_id, suppress_exception=False, session=None
     ):
-        """Returns HSM partition config for a project.
+        """Returns project token config for a project.
 
         :param project_id: ID of project
         :param suppress_exception: when True, NotFound is not raised
         :param session: SQLAlchemy session object
-        :raises NotFound: if no partition is found for the project
-        :returns: HSMPartitionConfig entity if found
+        :raises NotFound: if no token config is found for the project
+        :returns: ProjectTokenConfig entity if found
         """
         session = self.get_session(session)
 
         # First try to find by internal project ID
-        query = session.query(models.HSMPartitionConfig)
+        query = session.query(models.ProjectTokenConfig)
         query = query.filter_by(project_id=project_id)
 
         try:
@@ -2592,14 +2608,14 @@ class HSMPartitionConfigRepo(BaseRepo):
                 project_query = project_query.filter_by(external_id=project_id)
                 project = project_query.one()
 
-                # Then try to find the HSM partition
+                # Then try to find the project token
                 # config with the internal project ID
-                query = session.query(models.HSMPartitionConfig)
+                query = session.query(models.ProjectTokenConfig)
                 query = query.filter_by(project_id=project.id)
                 entity = query.one()
             except sa_orm.exc.NoResultFound:
                 LOG.info(
-                    "No HSM partition config found for project = %s",
+                    "No project token config found for project = %s",
                     project_id,
                 )
                 entity = None
@@ -2609,12 +2625,12 @@ class HSMPartitionConfigRepo(BaseRepo):
         return entity
 
     def _build_get_project_entities_query(self, project_id, session):
-        """Builds query for getting HSM partition config for a project.
+        """Builds query for getting project token config for a project.
 
         :param project_id: id of barbican project entity
         :param session: existing db session reference
         """
-        return session.query(models.HSMPartitionConfig).filter_by(
+        return session.query(models.ProjectTokenConfig).filter_by(
             project_id=project_id
         )
 
@@ -2814,11 +2830,11 @@ def get_encrypted_datum_repository():
     return _get_repository(_ENCRYPTED_DATUM_REPOSITORY, EncryptedDatumRepo)
 
 
-def get_hsm_partition_config_repository():
-    """Returns a singleton HSMPartitionConfig repository instance."""
-    global _HSM_PARTITION_CONFIG_REPOSITORY
+def get_project_token_config_repository():
+    """Returns a singleton ProjectTokenConfig repository instance."""
+    global _PROJECT_TOKEN_CONFIG_REPOSITORY
     return _get_repository(
-        _HSM_PARTITION_CONFIG_REPOSITORY, HSMPartitionConfigRepo
+        _PROJECT_TOKEN_CONFIG_REPOSITORY, ProjectTokenConfigRepo
     )
 
 
