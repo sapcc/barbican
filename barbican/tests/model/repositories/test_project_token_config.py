@@ -59,7 +59,9 @@ class WhenTestingProjectTokenConfigRepository(
         self.project.status = models.States.ACTIVE
         self.project.save(session=self.session)
 
-        self.project_token_config = _build_project_token_config(self.project.id)
+        self.project_token_config = _build_project_token_config(
+            self.project.id
+        )
         self.project_token_config.save(session=self.session)
 
     def test_get_project_token_config_returns_result(self):
@@ -121,7 +123,7 @@ class WhenTestingProjectTokenConfigRepository(
 
 
 class WhenValidatingProjectTokenConfig(database_utils.RepositoryTestCase):
-    """@validates coverage: must fire on in-memory assignment, not just save."""
+    """@validates coverage: must fire on in-memory assignment, not save."""
 
     def setUp(self):
         super(WhenValidatingProjectTokenConfig, self).setUp()
@@ -235,13 +237,14 @@ class WhenValidatingProjectTokenConfig(database_utils.RepositoryTestCase):
 
     def test_rejects_row_with_no_token_identifiers(self):
         # token_serial_number, slot_id, and token_label all None/empty.
-        self.assertRaises(
-            exception.Invalid,
-            _build_project_token_config,
+        # Validation is now enforced at flush time, not on assignment.
+        cfg = _build_project_token_config(
             self.project.id,
             slot_id=None,
             token_serial_number=None,
         )
+        cfg.token_label = None
+        self.assertRaises(exception.Invalid, cfg.save)
 
     def test_accepts_row_with_only_token_serial_number(self):
         cfg = models.ProjectTokenConfig()
@@ -262,12 +265,22 @@ class WhenValidatingProjectTokenConfig(database_utils.RepositoryTestCase):
             slot_id="0",
             token_serial_number=None,
         )
-        # token_label is set by the helper; clearing slot_id is fine because
-        # token_label still satisfies the invariant.
+        cfg.save()
+        # Clearing slot_id is fine because token_label still satisfies the
+        # invariant.
         cfg.slot_id = None
+        cfg.save()
         # But clearing token_label when slot_id and token_serial_number are
-        # both empty must fail.
-        self.assertRaises(
-            exception.Invalid,
-            setattr, cfg, "token_label", None,
+        # both empty must fail at flush time.
+        cfg.token_label = None
+        self.assertRaises(exception.Invalid, cfg.save)
+
+    def test_accepts_row_when_only_last_assigned_identifier_is_set(self):
+        cfg = _build_project_token_config(
+            self.project.id,
+            slot_id=None,
+            token_serial_number=None,
         )
+        # token_label is set to "my token label" by the helper.
+        cfg.save()
+        self.assertEqual("my token label", cfg.token_label)

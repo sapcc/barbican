@@ -65,6 +65,9 @@ def upgrade():
             ["projects.id"],
         ),
         sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint(
+            "project_id", name="_project_token_config_project_uc"
+        ),
     )
     op.create_index(
         op.f("ix_project_token_configs_project_id"),
