@@ -421,7 +421,7 @@ class SAPCommands(object):
 
     create_cloudhsms_config_description = (
         "Onboard a project to an HSM secret store: validate connectivity "
-        "and key existence, create the hsm_partition_configs row, and set "
+        "and key existence, create the project_token_configs row, and set "
         "the project preferred secret store."
     )
 

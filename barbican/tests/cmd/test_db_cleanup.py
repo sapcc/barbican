@@ -342,22 +342,22 @@ class WhenTestingDBCleanUpCommand(utils.RepositoryTestCase):
         clean.cleanup_unassociated_projects()
         self.assertFalse(_entry_exists(project_with_children))
 
-    def test_cleaning_unassociated_projects_keeps_hsm_partition_config(self):
-        """Projects referenced only by an HSM partition config must survive.
+    def test_cleaning_unassociated_projects_keeps_project_token_config(self):
+        """Projects referenced only by a project token config must survive.
 
-        hsm_partition_configs has a NOT NULL foreign key to projects. If such
+        project_token_configs has a NOT NULL foreign key to projects. If such
         a project is treated as unassociated, the hard DELETE fails with an
         integrity error (FK constraint), crashing db-cleanup. The project must
-        be recognised as associated via its HSMPartitionConfig child.
+        be recognised as associated via its ProjectTokenConfig child.
         """
         hsm_project = _setup_entry('project', external_id="hsm only project")
-        hsm_config = _setup_entry('hsm_partition_config', project=hsm_project)
+        hsm_config = _setup_entry('project_token_config', project=hsm_project)
 
         # Must not raise DBReferenceError and must not delete the project.
         clean.cleanup_unassociated_projects()
         self.assertTrue(_entry_exists(hsm_project))
 
-        # Once the HSM config is gone, the project is reapable.
+        # Once the token config is gone, the project is reapable.
         hsm_config.delete()
         clean.cleanup_unassociated_projects()
         self.assertFalse(_entry_exists(hsm_project))
