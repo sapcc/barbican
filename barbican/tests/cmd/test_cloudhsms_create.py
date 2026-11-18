@@ -55,7 +55,7 @@ class WhenCreatingHSMPartition(utils.BaseTestCase):
         self.repo.create_from.side_effect = lambda obj: obj
         self.useFixture(fixtures.MockPatchObject(
             cloudhsms_create.repositories,
-            "get_hsm_partition_config_repository",
+            "get_project_token_config_repository",
             return_value=self.repo))
         self.useFixture(fixtures.MockPatchObject(
             cloudhsms_create.repositories, "commit"))
