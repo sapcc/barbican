@@ -325,8 +325,8 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         self.pkek_cache_limit = self.conf.pkek_cache_limit
 
         # Initialize repository interfaces
-        self.hsm_partition_config_repo = (
-            repositories.get_hsm_partition_config_repository()
+        self.project_token_config_repo = (
+            repositories.get_project_token_config_repository()
         )
 
         # Runtime variables
@@ -334,7 +334,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         self.current_partition = None
 
     def _get_partition_for_project(self, project_id):
-        """Get HSM partition configuration for a project."""
+        """Get token configuration for a project."""
 
         if project_id is None:
             raise ValueError(
@@ -342,9 +342,9 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
                 "and no valid default partition is configured"
             )
 
-        # Check for project-specific partition config
+        # Check for project-specific token config
         try:
-            return self.hsm_partition_config_repo.get_by_project_id(project_id)
+            return self.project_token_config_repo.get_by_project_id(project_id)
         except Exception as e:
             LOG.warning(
                 f"Error finding default partition: {e}, {type(e).__name__}"
@@ -353,7 +353,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         # Fall back to default if configured
         if self.conf.default_partition_id:
             try:
-                return self.hsm_partition_config_repo.get(
+                return self.project_token_config_repo.get(
                     self.conf.default_partition_id
                 )
             except exception.NotFound:

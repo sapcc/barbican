@@ -23,11 +23,11 @@ import re
 from oslo_serialization import jsonutils as json
 from oslo_utils import timeutils
 import sqlalchemy as sa
+from sqlalchemy import event
 from sqlalchemy.ext import compiler
 from sqlalchemy.ext import declarative
 from sqlalchemy import orm
 from sqlalchemy.orm import collections as col
-from sqlalchemy.sql.schema import UniqueConstraint
 from sqlalchemy import types as sql_types
 
 from barbican.common import exception
@@ -1743,10 +1743,18 @@ class ProjectSecretStore(BASE, ModelBase):
         }
 
 
-class HSMPartitionConfig(BASE, ModelBase):
-    """Stores HSM partition configurations."""
+class ProjectTokenConfig(BASE, ModelBase):
+    """Per-project HSM token configuration."""
 
-    __tablename__ = "hsm_partition_configs"
+    __tablename__ = "project_token_configs"
+
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "project_id", name="_project_token_config_project_uc"
+        ),
+    )
+
+    _VENDOR_TYPES = frozenset({"utimaco", "thales"})
 
     # Link to project
     project_id = sa.Column(
@@ -1756,18 +1764,44 @@ class HSMPartitionConfig(BASE, ModelBase):
         index=True,
     )
 
-    # HSM partition details
+    # Vendor discriminator - drives per-vendor dispatch in the plugin
+    vendor_type = sa.Column(
+        sa.String(32),
+        nullable=False,
+    )
+
+    # Ordered list of HSM endpoints:
+    #   [{"host": str, "port": int, "order": int}, ...].
+    # `order` is a non-negative int; lower values mean higher priority
+    # Vendors with HA/failover list peers here
+    endpoints = sa.Column(
+        JsonBlob(),
+        nullable=False,
+    )
+
+    mkek_label = sa.Column(
+        sa.String(255),
+        nullable=False,
+    )
+
+    hmac_label = sa.Column(
+        sa.String(255),
+        nullable=False,
+    )
+
+    token_serial_number = sa.Column(
+        sa.String(64),
+        nullable=True,
+    )
+
     slot_id = sa.Column(
         sa.String(255),
-        nullable=False,
+        nullable=True,
     )
+
     token_label = sa.Column(
         sa.String(255),
-        nullable=False,
-    )
-    partition_label = sa.Column(
-        sa.String(255),
-        nullable=False,
+        nullable=True,
     )
 
     # Encrypted credentials stored as JSON
@@ -1776,8 +1810,8 @@ class HSMPartitionConfig(BASE, ModelBase):
         nullable=False,
     )
 
-    # Partition metadata
-    partition_metadata = sa.Column(
+    # Remaining vendor-specific data
+    vendor_metadata = sa.Column(
         JsonBlob(),
         nullable=True,
     )
@@ -1785,13 +1819,83 @@ class HSMPartitionConfig(BASE, ModelBase):
     # Relationship to Project
     project = orm.relationship("Project")
 
-    __table_args__ = (
-        UniqueConstraint(
-            "project_id",
-            "slot_id",
-            name="_hsm_partition_config_project_slot_uc",
-        ),
-    )
+    @orm.validates("vendor_type")
+    def _validate_vendor_type(self, key, value):
+        if value not in self._VENDOR_TYPES:
+            raise exception.Invalid(
+                u._(
+                    "vendor_type must be one of {allowed}, got {value!r}"
+                ).format(
+                    allowed=sorted(self._VENDOR_TYPES), value=value,
+                )
+            )
+        return value
+
+    @orm.validates("endpoints")
+    def _validate_endpoints(self, key, value):
+        if not isinstance(value, list) or len(value) < 1:
+            raise exception.Invalid(
+                u._("endpoints must be a non-empty list")
+            )
+        seen_orders = set()
+        for ep in value:
+            if not isinstance(ep, dict):
+                raise exception.Invalid(
+                    u._("each endpoint must be an object with host/port/order")
+                )
+            host = ep.get("host")
+            port = ep.get("port")
+            order = ep.get("order")
+            if not isinstance(host, str) or not host:
+                raise exception.Invalid(
+                    u._("endpoint host must be a non-empty string")
+                )
+            if not isinstance(port, int) or isinstance(port, bool):
+                raise exception.Invalid(
+                    u._("endpoint port must be an integer")
+                )
+            if (
+                not isinstance(order, int)
+                or isinstance(order, bool)
+                or order < 0
+            ):
+                raise exception.Invalid(
+                    u._("endpoint order must be a non-negative integer")
+                )
+            if order in seen_orders:
+                raise exception.Invalid(
+                    u._("endpoint order values must be unique")
+                )
+            seen_orders.add(order)
+        return value
+
+    def check_token_identifier(self):
+        if not any([
+            self.token_serial_number,
+            self.slot_id,
+            self.token_label,
+        ]):
+            raise exception.Invalid(
+                u._(
+                    "at least one of token_serial_number, slot_id, or "
+                    "token_label must be set"
+                )
+            )
+
+    # Transitional shim so the untouched plugin code keeps working until
+    @property
+    def partition_metadata(self):
+        return self.vendor_metadata
+
+    @partition_metadata.setter
+    def partition_metadata(self, value):
+        self.vendor_metadata = value
+
+
+@event.listens_for(ProjectTokenConfig, "before_insert")
+@event.listens_for(ProjectTokenConfig, "before_update")
+def validate_project_token_config(mapper, connection, target):
+    target.check_token_identifier()
 
 
 class SecretConsumerMetadatum(BASE, SoftDeleteMixIn, ModelBase):
