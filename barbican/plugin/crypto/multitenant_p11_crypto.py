@@ -306,8 +306,11 @@ class UtimacoBackend(VendorBackend):
 
 
 class ThalesBackend(VendorBackend):
-    """Thales: pass all three identifiers; the PKCS#11 driver resolves
-    them in priority order (serial → label → slot_id). No cfg rewrite."""
+    """Thales backend: pass all three identifiers to the driver.
+
+    The PKCS#11 driver resolves them in priority order
+    (serial → label → slot_id). No cfg rewrite.
+    """
 
     def apply(self, plugin, token_config):
         plugin.token_serial_number = token_config.token_serial_number
@@ -318,7 +321,7 @@ class ThalesBackend(VendorBackend):
             [token_config.token_label]
             if token_config.token_label else None
         )
-        # TODO: Thales-specific cfg rewrite (for multi-tenancy).
+        # TODO(rakib): Thales-specific cfg rewrite (for multi-tenancy).
 
 
 VENDOR_BACKENDS = {

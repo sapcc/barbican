@@ -362,8 +362,10 @@ class WhenTestingMultitenantP11CryptoPlugin(utils.BaseTestCase):
                 self.assertIn("Devices = 4000@10.246.244.60", content)
 
     def test_configure_pkcs11_utimaco_multi_endpoint_ha(self):
-        """Multiple endpoints emit one comma-separated Devices line,
-        entries ordered by the `order` field."""
+        """Multiple endpoints emit one comma-separated Devices line.
+
+        Entries are ordered by the ``order`` field.
+        """
         token_config = _utimaco_token_config(
             project_id=self.project_id,
             endpoints=[

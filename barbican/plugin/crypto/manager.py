@@ -21,7 +21,7 @@ from barbican.common import config
 from barbican.common import utils
 from barbican import i18n as u
 from barbican.plugin.crypto import base
-from barbican.plugin.crypto import cloudhsms_crypto
+from barbican.plugin.crypto import multitenant_p11_crypto as mt_p11
 from barbican.plugin.util import multiple_backends
 from barbican.plugin.util import utils as plugin_utils
 
@@ -63,14 +63,14 @@ def list_opts():
 def get_plugin_name(plugin):
     """Return the routing identity for a crypto plugin.
 
-    HSMPartitionCryptoPlugin instances share a Python class path, so
+    MultitenantP11CryptoPlugin instances share a Python class path, so
     generate_fullname_for() cannot distinguish per-instance plugins.
     For those, prefer legacy_plugin_name (set only when inheriting
     kek_data rows from a pre-rename deployment), otherwise use the
     configured plugin_name. All other plugins keep the historical
     class-path identity.
     """
-    if isinstance(plugin, cloudhsms_crypto.HSMPartitionCryptoPlugin):
+    if isinstance(plugin, mt_p11.MultitenantP11CryptoPlugin):
         legacy = getattr(plugin.conf, "legacy_plugin_name", None)
         if legacy:
             return legacy
@@ -102,17 +102,19 @@ class _CryptoPluginManager(named.NamedExtensionManager):
         plugin_utils.instantiate_plugins(
             self, invoke_args, invoke_kwargs)
 
-        # Also instantiate one HSMPartitionCryptoPlugin per configured
-        # [cloudhsms_crypto_plugins] plugin_names entry.
-        self._instantiate_hsm_partition_plugins(invoke_args, invoke_kwargs)
+        # Also instantiate one MultitenantP11CryptoPlugin per configured
+        # [multitenant_p11_crypto_plugins] plugin_names entry.
+        self._instantiate_multitenant_p11_plugins(invoke_args, invoke_kwargs)
 
-    def _instantiate_hsm_partition_plugins(self, invoke_args, invoke_kwargs):
+    def _instantiate_multitenant_p11_plugins(
+        self, invoke_args, invoke_kwargs
+    ):
         plugin_names = (
-            cloudhsms_crypto.CONF
-            .hsm_partition_crypto_plugins.plugin_names
+            mt_p11.CONF
+            .multitenant_p11_crypto_plugins.plugin_names
         )
         LOG.info(
-            "Instantiating HSM partition crypto plugins for: %s",
+            "Instantiating multitenant PKCS#11 crypto plugins for: %s",
             plugin_names or "(none configured)")
         seen_names = set()
 
@@ -120,20 +122,20 @@ class _CryptoPluginManager(named.NamedExtensionManager):
             if name in seen_names:
                 raise ValueError(
                     "duplicate plugin name '%s' in "
-                    "[cloudhsms_crypto_plugins] plugin_names — each "
+                    "[multitenant_p11_crypto_plugins] plugin_names — each "
                     "entry must appear once" % name
                 )
             seen_names.add(name)
 
             try:
-                plugin_inst = cloudhsms_crypto.HSMPartitionCryptoPlugin(
+                plugin_inst = mt_p11.MultitenantP11CryptoPlugin(
                     *invoke_args,
                     store_plugin_name=name,
                     **invoke_kwargs,
                 )
             except Exception:
                 LOG.exception(
-                    "Failed to instantiate HSMPartitionCryptoPlugin for "
+                    "Failed to instantiate MultitenantP11CryptoPlugin for "
                     "'%s'", name)
                 continue
 
@@ -142,8 +144,8 @@ class _CryptoPluginManager(named.NamedExtensionManager):
                 entry_point=importlib_metadata.EntryPoint(
                     name=name,
                     value=(
-                        "barbican.plugin.crypto.cloudhsms_crypto:"
-                        "HSMPartitionCryptoPlugin"
+                        "barbican.plugin.crypto.multitenant_p11_crypto:"
+                        "MultitenantP11CryptoPlugin"
                     ),
                     group=DEFAULT_PLUGIN_NAMESPACE,
                 ),
@@ -158,13 +160,13 @@ class _CryptoPluginManager(named.NamedExtensionManager):
                 if existing.name == name:
                     LOG.debug(
                         "Replacing stevedore stub for '%s' with live "
-                        "HSMPartitionCryptoPlugin instance", name)
+                        "MultitenantP11CryptoPlugin instance", name)
                     self.extensions[i] = ext
                     break
             else:
                 self.extensions.append(ext)
 
-            LOG.info("Registered cloudhsms_crypto_plugin:%s)", name)
+            LOG.info("Registered multitenant_p11_crypto_plugin:%s", name)
 
     def get_plugin_store_generate(self, type_needed, algorithm=None,
                                   bit_length=None, mode=None, project_id=None):
