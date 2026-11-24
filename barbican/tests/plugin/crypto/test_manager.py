@@ -15,8 +15,8 @@ from unittest import mock
 
 from barbican.common import utils as common_utils
 from barbican.plugin.crypto import base
-from barbican.plugin.crypto import cloudhsms_crypto
 from barbican.plugin.crypto import manager as cm
+from barbican.plugin.crypto import multitenant_p11_crypto as mt_p11
 from barbican.tests import utils
 
 
@@ -115,7 +115,7 @@ class WhenTestingManager(utils.BaseTestCase):
 
 
 class WhenTestingPluginName(utils.BaseTestCase):
-    """get_plugin_name() distinguishes HSMPartition instances by config."""
+    """get_plugin_name() distinguishes multitenant PKCS#11 instances by cfg."""
 
     def test_non_hsm_plugin_falls_back_to_fullname(self):
         plugin = mock.MagicMock()
@@ -124,38 +124,38 @@ class WhenTestingPluginName(utils.BaseTestCase):
             cm.get_plugin_name(plugin),
         )
 
-    def test_hsm_partition_plugin_uses_configured_name(self):
+    def test_multitenant_p11_plugin_uses_configured_name(self):
         plugin = mock.MagicMock(
-            spec=cloudhsms_crypto.HSMPartitionCryptoPlugin)
+            spec=mt_p11.MultitenantP11CryptoPlugin)
         plugin.conf = mock.MagicMock(legacy_plugin_name=None)
         plugin.get_plugin_name.return_value = "utimaco_hsm_42"
 
         self.assertEqual("utimaco_hsm_42", cm.get_plugin_name(plugin))
 
-    def test_hsm_partition_plugin_prefers_legacy_name(self):
+    def test_multitenant_p11_plugin_prefers_legacy_name(self):
         plugin = mock.MagicMock(
-            spec=cloudhsms_crypto.HSMPartitionCryptoPlugin)
+            spec=mt_p11.MultitenantP11CryptoPlugin)
         plugin.conf = mock.MagicMock(
             legacy_plugin_name=(
-                "barbican.plugin.crypto.cloudhsms_crypto."
-                "UtimacocHSMCryptoPlugin"
+                "barbican.plugin.crypto.hsm_partition_crypto."
+                "UtimacoHSMPartitionCryptoPlugin"
             )
         )
         plugin.get_plugin_name.return_value = "utimaco_hsm_1"
 
         self.assertEqual(
-            "barbican.plugin.crypto.cloudhsms_crypto."
-            "UtimacocHSMCryptoPlugin",
+            "barbican.plugin.crypto.hsm_partition_crypto."
+            "UtimacoHSMPartitionCryptoPlugin",
             cm.get_plugin_name(plugin),
         )
 
-    def test_two_hsm_instances_have_distinct_identity(self):
+    def test_two_multitenant_p11_instances_have_distinct_identity(self):
         a = mock.MagicMock(
-            spec=cloudhsms_crypto.HSMPartitionCryptoPlugin)
+            spec=mt_p11.MultitenantP11CryptoPlugin)
         a.conf = mock.MagicMock(legacy_plugin_name=None)
         a.get_plugin_name.return_value = "utimaco_hsm"
         b = mock.MagicMock(
-            spec=cloudhsms_crypto.HSMPartitionCryptoPlugin)
+            spec=mt_p11.MultitenantP11CryptoPlugin)
         b.conf = mock.MagicMock(legacy_plugin_name=None)
         b.get_plugin_name.return_value = "utimaco_hsm_2"
 
@@ -163,11 +163,11 @@ class WhenTestingPluginName(utils.BaseTestCase):
 
 
 class WhenTestingApplianceInstantiation(utils.BaseTestCase):
-    """Manager instantiates one HSMPartitionCryptoPlugin per plugin_names."""
+    """Manager instantiates one MultitenantP11CryptoPlugin per plugin_names."""
 
     def _fake_plugin(self, plugin_name):
         inst = mock.MagicMock(
-            spec=cloudhsms_crypto.HSMPartitionCryptoPlugin)
+            spec=mt_p11.MultitenantP11CryptoPlugin)
         inst.conf = mock.MagicMock(legacy_plugin_name=None)
         inst.get_plugin_name.return_value = plugin_name
         return inst
@@ -197,17 +197,17 @@ class WhenTestingApplianceInstantiation(utils.BaseTestCase):
         original_extensions = list(mgr.extensions)
         try:
             with mock.patch(
-                "barbican.plugin.crypto.cloudhsms_crypto.CONF"
+                "barbican.plugin.crypto.multitenant_p11_crypto.CONF"
             ) as mock_conf, mock.patch(
-                "barbican.plugin.crypto.cloudhsms_crypto"
-                ".HSMPartitionCryptoPlugin",
+                "barbican.plugin.crypto.multitenant_p11_crypto"
+                ".MultitenantP11CryptoPlugin",
                 side_effect=[fake_a, fake_b],
             ):
-                mock_conf.cloudhsms_crypto_plugins.plugin_names = [
+                mock_conf.multitenant_p11_crypto_plugins.plugin_names = [
                     "shared_appliance", "shared_appliance"]
                 self.assertRaises(
                     ValueError,
-                    mgr._instantiate_hsm_partition_plugins,
+                    mgr._instantiate_multitenant_p11_plugins,
                     (), {},
                 )
         finally:

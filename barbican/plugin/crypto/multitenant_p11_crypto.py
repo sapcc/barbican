@@ -29,33 +29,33 @@ from barbican.plugin.crypto import p11_crypto
 LOG = utils.getLogger(__name__)
 CONF = config.new_config()
 
-# Register the HSM partition crypto plugin instance list.
-hsm_partition_crypto_plugins_group = cfg.OptGroup(
-    name="hsm_partition_crypto_plugins",
-    title="HSM Partition Crypto Plugin Instances",
+# Register the multitenant PKCS#11 crypto plugin instance list.
+multitenant_p11_crypto_plugins_group = cfg.OptGroup(
+    name="multitenant_p11_crypto_plugins",
+    title="Multitenant PKCS#11 Crypto Plugin Instances",
 )
-hsm_partition_crypto_plugins_opts = [
+multitenant_p11_crypto_plugins_opts = [
     cfg.ListOpt(
         "plugin_names",
         default=[],
         help=u._(
-            "List of HSM partition crypto plugin instance names. Each "
-            "name here must have a matching "
-            "[hsm_partition_crypto_plugin:<name>] section carrying its "
+            "List of multitenant PKCS#11 crypto plugin instance names. "
+            "Each name here must have a matching "
+            "[multitenant_p11_crypto_plugin:<name>] section carrying its "
             "plugin_name (used as the routing identity) and vendor "
             "library configuration. Each entry becomes one "
-            "HSMPartitionCryptoPlugin instance; distinct entries do not "
+            "MultitenantP11CryptoPlugin instance; distinct entries do not "
             "need to map to distinct physical HSMs."
         ),
     ),
 ]
 
-# Register hsm partition plugin options
-hsm_partition_crypto_plugin_group = cfg.OptGroup(
-    name="hsm_partition_crypto_plugin",
-    title="HSM Partition Crypto Plugin Options",
+# Register multitenant PKCS#11 plugin options
+multitenant_p11_crypto_plugin_group = cfg.OptGroup(
+    name="multitenant_p11_crypto_plugin",
+    title="Multitenant PKCS#11 Crypto Plugin Options",
 )
-hsm_partition_crypto_plugin_opts = [
+multitenant_p11_crypto_plugin_opts = [
     cfg.StrOpt(
         "library_path",
         help=u._("Path to vendor library"),
@@ -63,7 +63,7 @@ hsm_partition_crypto_plugin_opts = [
     cfg.StrOpt(
         "plugin_name",
         help=u._("User friendly plugin name"),
-        default="HSM Partition Crypto Plugin",
+        default="Multitenant PKCS#11 Crypto Plugin",
     ),
     cfg.StrOpt(
         "legacy_plugin_name",
@@ -78,8 +78,8 @@ hsm_partition_crypto_plugin_opts = [
         ),
     ),
     cfg.StrOpt(
-        "default_partition_id",
-        help=u._("Default HSM partition ID if no project mapping exists"),
+        "default_token_config_id",
+        help=u._("Default token config ID if no project mapping exists"),
         default=None,
     ),
     cfg.StrOpt(
@@ -177,7 +177,7 @@ hsm_partition_crypto_plugin_opts = [
         default="/mnt/secrets/hsm-config-key",
         help=u._(
             "Path to the base64 file holding the 32-byte AES-256 HSM config "
-            "key used to decrypt the partition CU-PIN at rest. Barbican never "
+            "key used to decrypt the stored CU-PIN at rest. Barbican never "
             "generates this key; login fails if it is missing or invalid."
         ),
     ),
@@ -185,69 +185,159 @@ hsm_partition_crypto_plugin_opts = [
 
 
 # Register per-instance config sections
-def register_opts_for_hsm_plugin_instances(conf):
+def register_opts_for_multitenant_p11_plugin_instances(conf):
     """Register a config section per configured plugin instance.
 
-    Reads [hsm_partition_crypto_plugins] plugin_names from `conf` and
-    registers a [hsm_partition_crypto_plugin:<name>] group for each.
+    Reads [multitenant_p11_crypto_plugins] plugin_names from `conf` and
+    registers a [multitenant_p11_crypto_plugin:<name>] group for each.
     """
-    plugin_names = conf.hsm_partition_crypto_plugins.plugin_names
+    plugin_names = conf.multitenant_p11_crypto_plugins.plugin_names
 
     for name in plugin_names:
         # Construct the section name
-        section_name = f"hsm_partition_crypto_plugin:{name}"
+        section_name = f"multitenant_p11_crypto_plugin:{name}"
 
         # Create a new option group for this plugin instance
         instance_group = cfg.OptGroup(
             name=section_name,
-            title=f"HSM Partition Crypto Plugin Options for {name}",
+            title=f"Multitenant PKCS#11 Crypto Plugin Options for {name}",
         )
 
         # Register the group and options
         conf.register_group(instance_group)
         conf.register_opts(
-            hsm_partition_crypto_plugin_opts, group=instance_group
+            multitenant_p11_crypto_plugin_opts, group=instance_group
         )
 
         LOG.debug(
-            f"Registered HSM plugin instance configuration section: "
-            f"{section_name}"
+            f"Registered multitenant PKCS#11 plugin instance configuration "
+            f"section: {section_name}"
         )
 
 
-# Register [hsm_partition_crypto_plugins] first, then parse args so the
+# Register [multitenant_p11_crypto_plugins] first, then parse args so the
 # plugin_names list is readable, then register a section per listed name.
-CONF.register_group(hsm_partition_crypto_plugins_group)
+CONF.register_group(multitenant_p11_crypto_plugins_group)
 CONF.register_opts(
-    hsm_partition_crypto_plugins_opts,
-    group=hsm_partition_crypto_plugins_group,
+    multitenant_p11_crypto_plugins_opts,
+    group=multitenant_p11_crypto_plugins_group,
 )
 
-CONF.register_group(hsm_partition_crypto_plugin_group)
+CONF.register_group(multitenant_p11_crypto_plugin_group)
 CONF.register_opts(
-    hsm_partition_crypto_plugin_opts, group=hsm_partition_crypto_plugin_group
+    multitenant_p11_crypto_plugin_opts,
+    group=multitenant_p11_crypto_plugin_group,
 )
 config.parse_args(CONF)
 
 # Now that CONF is parsed, iterate the plugin instance list.
-register_opts_for_hsm_plugin_instances(CONF)
+register_opts_for_multitenant_p11_plugin_instances(CONF)
 
 
 def list_opts():
-    yield hsm_partition_crypto_plugins_group, \
-        hsm_partition_crypto_plugins_opts
-    # Per-instance [hsm_partition_crypto_plugin:<name>] sections use the
+    yield multitenant_p11_crypto_plugins_group, \
+        multitenant_p11_crypto_plugins_opts
+    # Per-instance [multitenant_p11_crypto_plugin:<name>] sections use the
     # same options as below; they are registered at parse-time from the
     # plugin_names list and cannot be enumerated statically here.
-    yield hsm_partition_crypto_plugin_group, hsm_partition_crypto_plugin_opts
+    yield multitenant_p11_crypto_plugin_group, \
+        multitenant_p11_crypto_plugin_opts
 
 
-class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
-    """PKCS11 crypto plugin for HSMaaS.
+class VendorBackend:
+    """Per-vendor hook for token-identifier resolution + cfg rewrite."""
 
-    Inherits from P11CryptoPlugin. This plugin extends the base PKCS11 plugin
-    to support per-project HSM partitions. Each project is mapped to its own
-    HSM partition with isolated keys and credentials.
+    def apply(self, plugin, token_config):
+        raise NotImplementedError
+
+
+class UtimacoBackend(VendorBackend):
+    """Utimaco: serial-only resolution plus per-request cfg rewrite."""
+
+    # Path the Utimaco PKCS#11 library was initialized with. The library
+    # caches CS_PKCS11_R3_CFG at C_Initialize and ignores later env
+    # changes, so we rewrite this file in place for every token switch.
+    _CFG_PATH = os.environ.get(
+        "CS_PKCS11_R3_CFG",
+        os.path.join(tempfile.gettempdir(), "utimaco", "cs_pkcs11_R3.cfg")
+    )
+
+    def apply(self, plugin, token_config):
+        plugin.token_serial_number = token_config.token_serial_number
+        plugin.slot_id = None
+        plugin.token_labels = None
+        cfg_path = self._generate_cfg(token_config)
+        LOG.info(
+            "_configure_pkcs11 wrote Utimaco cfg path=%s endpoints=%s",
+            cfg_path, token_config.endpoints,
+        )
+
+    def _generate_cfg(self, token_config):
+        """Rewrite the Utimaco PKCS#11 cfg in place and return its path.
+
+        Emits a single comma-separated `Devices = port@host,...` line in
+        a `[HSMCluster]` block so the Utimaco driver can fail over
+        between peers. Entries are ordered by ascending `order`.
+        """
+        endpoints = sorted(
+            token_config.endpoints, key=lambda ep: ep["order"]
+        )
+        devices_value = ",".join(
+            f"{ep['port']}@{ep['host']}" for ep in endpoints
+        )
+        cfg_content = (
+            "[Global]\n"
+            f"Logpath = {tempfile.gettempdir()}\n"
+            "Logging = 4\n"
+            "SlotMultiSession = true\n"
+            "SlotCount = 10\n"
+            "\n"
+            "[HSMCluster]\n"
+            f"Devices = {devices_value}\n"
+        )
+        cfg_path = self._CFG_PATH
+        os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+        with open(cfg_path, "w") as f:
+            f.write(cfg_content)
+        LOG.debug(
+            "Rewrote Utimaco cfg at %s:\n%s", cfg_path, cfg_content
+        )
+        return cfg_path
+
+
+class ThalesBackend(VendorBackend):
+    """Thales backend: pass all three identifiers to the driver.
+
+    The PKCS#11 driver resolves them in priority order
+    (serial → label → slot_id). No cfg rewrite.
+    """
+
+    def apply(self, plugin, token_config):
+        plugin.token_serial_number = token_config.token_serial_number
+        plugin.slot_id = (
+            int(token_config.slot_id) if token_config.slot_id else None
+        )
+        plugin.token_labels = (
+            [token_config.token_label]
+            if token_config.token_label else None
+        )
+        # TODO(rakib): Thales-specific cfg rewrite (for multi-tenancy).
+
+
+VENDOR_BACKENDS = {
+    "utimaco": UtimacoBackend(),
+    "thales": ThalesBackend(),
+}
+
+
+class MultitenantP11CryptoPlugin(p11_crypto.P11CryptoPlugin):
+    """Multitenant PKCS#11 crypto plugin.
+
+    Inherits from P11CryptoPlugin. Adds per-project token-config
+    resolution: each project is mapped to its own HSM token (slot /
+    partition / container, depending on the vendor) with isolated keys
+    and credentials, and the underlying PKCS#11 library is reconfigured
+    on each project switch.
     """
 
     def __init__(
@@ -267,12 +357,12 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
 
         # Build section name based on secret store
         self.section_name = (
-            f"hsm_partition_crypto_plugin:{self.store_plugin_name}"
+            f"multitenant_p11_crypto_plugin:{self.store_plugin_name}"
         )
 
         # If this is a default instance (no specific store), use base config
         if self.store_plugin_name == "default":
-            self.section_name = "hsm_partition_crypto_plugin"
+            self.section_name = "multitenant_p11_crypto_plugin"
 
         # Make sure PKCS11 object is available
         self.pkcs11 = None
@@ -280,7 +370,10 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         # Get config for this section
         try:
             self.conf = conf[self.section_name]
-            LOG.info(f"Using HSM configuration section: {self.section_name}")
+            LOG.info(
+                f"Using multitenant PKCS#11 configuration section: "
+                f"{self.section_name}"
+            )
         except (cfg.NoSuchGroupError, cfg.NoSuchOptError):
             # Section doesn't exist - create a new one dynamically
             LOG.warning(
@@ -289,11 +382,13 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
             )
             group = cfg.OptGroup(
                 name=self.section_name,
-                title=f"HSM Partition "
-                f"Crypto Plugin Options for {self.store_plugin_name}",
+                title=f"Multitenant PKCS#11 Crypto Plugin Options for "
+                f"{self.store_plugin_name}",
             )
             conf.register_group(group)
-            conf.register_opts(hsm_partition_crypto_plugin_opts, group=group)
+            conf.register_opts(
+                multitenant_p11_crypto_plugin_opts, group=group
+            )
             self.conf = conf[self.section_name]
 
         # Initialize basic attributes from config
@@ -331,15 +426,15 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
 
         # Runtime variables
         self.current_project_id = None
-        self.current_partition = None
+        self.current_token_config = None
 
-    def _get_partition_for_project(self, project_id):
+    def _get_token_config_for_project(self, project_id):
         """Get token configuration for a project."""
 
         if project_id is None:
             raise ValueError(
-                "No HSM partition mapping found for the project "
-                "and no valid default partition is configured"
+                "No token config mapping found for the project "
+                "and no valid default token config is configured"
             )
 
         # Check for project-specific token config
@@ -347,60 +442,30 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
             return self.project_token_config_repo.get_by_project_id(project_id)
         except Exception as e:
             LOG.warning(
-                f"Error finding default partition: {e}, {type(e).__name__}"
+                f"Error finding default token config: {e}, "
+                f"{type(e).__name__}"
             )
 
         # Fall back to default if configured
-        if self.conf.default_partition_id:
+        if self.conf.default_token_config_id:
             try:
                 return self.project_token_config_repo.get(
-                    self.conf.default_partition_id
+                    self.conf.default_token_config_id
                 )
             except exception.NotFound:
                 LOG.warning(
-                    f"Default partition ID {self.conf.default_partition_id}"
-                    "not found"
+                    f"Default token config ID "
+                    f"{self.conf.default_token_config_id} not found"
                 )
                 pass
 
         # Nothing found
         raise ValueError(
             u._(
-                "No HSM partition mapping found for the project "
-                "and no valid default partition is configured"
+                "No token config mapping found for the project "
+                "and no valid default token config is configured"
             )
         )
-
-    # Path the Utimaco PKCS#11 library was initialized with. The library
-    # caches CS_PKCS11_R3_CFG at C_Initialize and ignores later env
-    # changes, so we rewrite THIS file in place for every partition
-    # switch.
-    _UTIMACO_CFG_PATH = os.environ.get(
-        "CS_PKCS11_R3_CFG",
-        os.path.join(tempfile.gettempdir(), "utimaco", "cs_pkcs11_R3.cfg")
-    )
-
-    def _generate_utimaco_cfg(self, container_id, device_ip):
-        """Rewrite the Utimaco PKCS#11 cfg in place and return its path."""
-        port = container_id + 4000
-        cfg_content = (
-            "[Global]\n"
-            f"Logpath = {tempfile.gettempdir()}\n"
-            "Logging = 4\n"
-            "SlotMultiSession = true\n"
-            "SlotCount = 10\n"
-            "\n"
-            "[HSMCluster]\n"
-            f"Devices = {port}@{device_ip}\n"
-        )
-        cfg_path = self._UTIMACO_CFG_PATH
-        os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
-        with open(cfg_path, "w") as f:
-            f.write(cfg_content)
-        LOG.debug(
-            "Rewrote Utimaco cfg at %s:\n%s", cfg_path, cfg_content
-        )
-        return cfg_path
 
     def _decrypt_pin(self, credentials):
         """Decrypt the stored CU-PIN envelope; fail hard, no fallback.
@@ -429,51 +494,53 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
                       project_id)
             return
 
-        partition = self._get_partition_for_project(project_id)
-        metadata = partition.partition_metadata or {}
+        token_config = self._get_token_config_for_project(project_id)
+        metadata = token_config.vendor_metadata or {}
 
         self.current_project_id = project_id
-        self.current_partition = partition
-        self.login = self._decrypt_pin(partition.credentials)
-        self.token_serial_number = metadata.get("token_serial_number")
-        # Utimaco containers resolve via token serial; others fall back to
-        # token label / slot id so legacy partitions keep working.
-        if self.token_serial_number:
-            self.slot_id = None
-            self.token_labels = None
-        else:
-            self.slot_id = int(partition.slot_id)
-            self.token_labels = (
-                [partition.token_label] if partition.token_label else None
-            )
-        # Per-partition MKEK/HMAC label overrides. Fall back to the
-        # config-section defaults when the partition record is silent.
-        self.mkek_label = metadata.get("mkek_label") or self.conf.mkek_label
-        self.hmac_label = metadata.get("hmac_label") or self.conf.hmac_label
+        self.current_token_config = token_config
+        self.login = self._decrypt_pin(token_config.credentials)
 
-        LOG.debug(
-            "Partition config: slot_id=%s, token_label=%s, "
-            "token_serial_number=%s, mkek_label=%s, hmac_label=%s, "
-            "metadata=%s",
-            self.slot_id, self.token_labels, self.token_serial_number,
-            self.mkek_label, self.hmac_label, metadata,
+        # Per-row MKEK/HMAC label overrides.
+        self.mkek_label = (
+            token_config.mkek_label
+            or metadata.get("mkek_label")
+            or self.conf.mkek_label
+        )
+        self.hmac_label = (
+            token_config.hmac_label
+            or metadata.get("hmac_label")
+            or self.conf.hmac_label
         )
 
-        device_ip = metadata.get("device_ip")
-        container_id = metadata.get("container_id")
-        if device_ip and container_id is not None and self.token_serial_number:
-            container_id = int(container_id)
-            cfg_path = self._generate_utimaco_cfg(container_id, device_ip)
-            LOG.info(
-                "_configure_pkcs11 wrote cfg path=%s device=%s port=%d "
-                "for project=%s",
-                cfg_path, device_ip, container_id + 4000, project_id,
+        # Vendor dispatch via the backend registry.
+        try:
+            backend = VENDOR_BACKENDS[token_config.vendor_type]
+        except KeyError:
+            raise exception.BarbicanException(
+                u._(
+                    "Unsupported vendor_type {vendor_type!r} on token "
+                    "config for project {project_id}"
+                ).format(
+                    vendor_type=token_config.vendor_type,
+                    project_id=project_id,
+                )
             )
+        backend.apply(self, token_config)
+
+        LOG.debug(
+            "Token config: vendor_type=%s, slot_id=%s, token_label=%s, "
+            "token_serial_number=%s, mkek_label=%s, hmac_label=%s, "
+            "endpoints=%s",
+            token_config.vendor_type, self.slot_id, self.token_labels,
+            self.token_serial_number, self.mkek_label, self.hmac_label,
+            token_config.endpoints,
+        )
 
         # Finalize the existing library before re-init. Without this, the
         # next C_Initialize returns 0x191 (CKR_CRYPTOKI_ALREADY_INITIALIZED,
         # silently tolerated) and the library stays bound to the previous
-        # device, so _get_slot_id can't find the new partition's serial.
+        # device, so _get_slot_id can't find the new token's serial.
         if self.pkcs11 is not None:
             LOG.info("_configure_pkcs11 finalizing before re-init")
             self.pkcs11.finalize()
@@ -492,7 +559,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
 
     def encrypt(self, encrypt_dto, kek_meta_dto, project_id):
         self._configure_pkcs11(project_id)
-        return super(HSMPartitionCryptoPlugin, self).encrypt(
+        return super(MultitenantP11CryptoPlugin, self).encrypt(
             encrypt_dto, kek_meta_dto, project_id
         )
 
@@ -500,7 +567,7 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
         self, decrypt_dto, kek_meta_dto, kek_meta_extended, project_id
     ):
         self._configure_pkcs11(project_id)
-        return super(HSMPartitionCryptoPlugin, self).decrypt(
+        return super(MultitenantP11CryptoPlugin, self).decrypt(
             decrypt_dto, kek_meta_dto, kek_meta_extended, project_id
         )
 
@@ -516,24 +583,26 @@ class HSMPartitionCryptoPlugin(p11_crypto.P11CryptoPlugin):
             if len(label_parts) >= 4 and label_parts[0] == "project":
                 project_id = label_parts[1]
             else:
-                # If we can't determine project_id, use default partition
+                # If we can't determine project_id, use default token config
                 LOG.warning(
                     "Cannot determine project_id from kek_label: %s, "
-                    "using default partition",
+                    "using default token config",
                     kek_meta_dto.kek_label,
                 )
                 project_id = "default"
         except (AttributeError, IndexError):
-            LOG.warning("Invalid kek_label format, using default partition")
+            LOG.warning(
+                "Invalid kek_label format, using default token config"
+            )
             project_id = "default"
 
         self._configure_pkcs11(project_id)
-        return super(HSMPartitionCryptoPlugin, self).bind_kek_metadata(
+        return super(MultitenantP11CryptoPlugin, self).bind_kek_metadata(
             kek_meta_dto
         )
 
     def generate_symmetric(self, generate_dto, kek_meta_dto, project_id):
         self._configure_pkcs11(project_id)
-        return super(HSMPartitionCryptoPlugin, self).generate_symmetric(
+        return super(MultitenantP11CryptoPlugin, self).generate_symmetric(
             generate_dto, kek_meta_dto, project_id
         )
