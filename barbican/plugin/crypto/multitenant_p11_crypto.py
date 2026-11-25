@@ -25,6 +25,7 @@ from barbican import i18n as u
 from barbican.model import repositories
 from barbican.plugin.crypto import hsm_config_key
 from barbican.plugin.crypto import p11_crypto
+from barbican.plugin.crypto.vendor import utimaco as utimaco_vendor
 
 LOG = utils.getLogger(__name__)
 CONF = config.new_config()
@@ -279,21 +280,8 @@ class UtimacoBackend(VendorBackend):
         a `[HSMCluster]` block so the Utimaco driver can fail over
         between peers. Entries are ordered by ascending `order`.
         """
-        endpoints = sorted(
-            token_config.endpoints, key=lambda ep: ep["order"]
-        )
-        devices_value = ",".join(
-            f"{ep['port']}@{ep['host']}" for ep in endpoints
-        )
-        cfg_content = (
-            "[Global]\n"
-            f"Logpath = {tempfile.gettempdir()}\n"
-            "Logging = 4\n"
-            "SlotMultiSession = true\n"
-            "SlotCount = 10\n"
-            "\n"
-            "[HSMCluster]\n"
-            f"Devices = {devices_value}\n"
+        cfg_content = utimaco_vendor.render_utimaco_cfg(
+            token_config.endpoints
         )
         cfg_path = self._CFG_PATH
         os.makedirs(os.path.dirname(cfg_path), exist_ok=True)

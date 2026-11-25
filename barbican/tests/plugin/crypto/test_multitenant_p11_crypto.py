@@ -394,10 +394,10 @@ class WhenTestingMultitenantP11CryptoPlugin(utils.BaseTestCase):
                     content = f.read()
 
         self.assertEqual(1, content.count("[HSMCluster]"))
-        # One comma-separated Devices line, entries ordered by `order`.
+        # One Devices line listing all cluster members, ordered by `order`.
         self.assertEqual(1, content.count("Devices ="))
         self.assertIn(
-            "Devices = 4009@10.0.0.1,4010@10.0.0.2", content
+            "Devices = { 4009@10.0.0.1 4010@10.0.0.2 }", content
         )
 
     def test_get_plugin_name_for_default_store_plugin_name(self):
