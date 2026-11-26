@@ -27,9 +27,9 @@ from oslo_log import log as logging
 
 from sqlalchemy import create_engine, text
 
-from barbican.cmd.hsm_partition_create import create_hsm_partition
 from barbican.cmd import pkcs11_kek_rewrap as pkcs11_rewrap
 from barbican.cmd import simple_crypto
+from barbican.cmd import token_config_create
 from barbican.common import config
 from barbican.model import clean
 from barbican.model.migration import commands
@@ -419,26 +419,45 @@ class SAPCommands(object):
             except Exception as exc:
                 print(f"An error occurred: {exc}")
 
+    create_token_config_description = (
+        "Register a project token config: validate connectivity and key "
+        "existence, create the project_token_configs row, and set the "
+        "project preferred secret store."
+    )
+
+    @args(
+        "--vendor-type",
+        dest="vendor_type",
+        metavar="<vendor-type>",
+        choices=["utimaco", "thales"],
+        help="HSM vendor type (utimaco|thales)",
+    )
     @args(
         "--external-project-id",
         "-p",
         dest="external_project_id",
         metavar="<external-project-id>",
-        help="External project ID",
+        help="External project ID (OpenStack project ID)",
     )
     @args(
-        "--partition-label",
-        "-l",
-        dest="partition_label",
-        metavar="<partition-label>",
-        help="Label for the HSM partition",
+        "--endpoint",
+        dest="endpoint",
+        metavar="host=H,port=P,order=O",
+        action="append",
+        default=[],
+        help=(
+            "HSM endpoint spec. Repeatable; at least one required. Each "
+            "value must contain host, port, and order (e.g. "
+            "'host=10.0.0.1,port=4001,order=0'). Lower order = higher "
+            "priority. All order values must be unique across endpoints."
+        ),
     )
     @args(
         "--token-label",
         "-t",
         dest="token_label",
         metavar="<token-label>",
-        help="Token label",
+        help="Token label (optional; used for slot resolution)",
     )
     @args(
         "--slot-id",
@@ -446,19 +465,75 @@ class SAPCommands(object):
         dest="slot_id",
         type=int,
         metavar="<slot-id>",
-        help="Slot ID for the HSM",
+        help="Slot ID (optional; used for slot resolution)",
     )
     @args(
         "--password",
         dest="password",
         metavar="<password>",
-        help="Password/PIN for the HSM",
+        help="Password/PIN for the token",
     )
     @args(
-        "--partition-id",
-        dest="partition_id",
-        metavar="<partition-id>",
-        help="Override partition UUID",
+        "--token-config-id",
+        dest="token_config_id",
+        metavar="<token-config-id>",
+        help="Override the token config UUID (default: generated)",
+    )
+    @args(
+        "--token-serial-number",
+        dest="token_serial_number",
+        metavar="<token-serial-number>",
+        help=(
+            "Token serial number (required for Utimaco; one of "
+            "serial/slot/label required for Thales)"
+        ),
+    )
+    @args(
+        "--mkek-label",
+        dest="mkek_label",
+        metavar="<mkek-label>",
+        help="MKEK key label stored on this token",
+    )
+    @args(
+        "--hmac-label",
+        dest="hmac_label",
+        metavar="<hmac-label>",
+        help="HMAC key label stored on this token",
+    )
+    @args(
+        "--secret-store-id",
+        dest="secret_store_id",
+        metavar="<secret-store-id>",
+        default=None,
+        help="ID of the secret store to set as the project preferred store",
+    )
+    @args(
+        "--library-path",
+        dest="library_path",
+        metavar="<library-path>",
+        default=None,
+        help="Path to the PKCS11 shared library on this host",
+    )
+    @args(
+        "--config-key-path",
+        dest="config_key_path",
+        metavar="<config-key-path>",
+        default="/mnt/secrets/hsm-config-key",
+        help=(
+            "Path to the base64 file holding the 32-byte AES-256 HSM config "
+            "key used to encrypt the token CU-PIN at rest. Barbican never "
+            "generates this key; creation fails if it is missing or invalid."
+        ),
+    )
+    @args(
+        "--skip-hsm-checks",
+        dest="skip_hsm_checks",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip HSM connectivity and MKEK/HMAC key-existence checks. "
+            "Useful for pre-provisioning configs before the HSM is live."
+        ),
     )
     @args(
         "--debug",
@@ -467,27 +542,43 @@ class SAPCommands(object):
         default=False,
         help="Enable debug output",
     )
-    def create_hsm_partition_config(
+    def create_token_config(
         self,
         conf,
+        vendor_type=None,
         external_project_id=None,
-        partition_label=None,
+        endpoint=None,
         token_label=None,
         slot_id=None,
         password=None,
-        partition_id=None,
+        token_config_id=None,
+        token_serial_number=None,
+        mkek_label=None,
+        hmac_label=None,
+        secret_store_id=None,
+        library_path=None,
+        config_key_path="/mnt/secrets/hsm-config-key",
+        skip_hsm_checks=False,
         debug=False,
     ):
         parsed_args = argparse.Namespace(
+            vendor_type=vendor_type,
             external_project_id=external_project_id,
+            endpoint=endpoint or [],
             token_label=token_label,
             slot_id=slot_id,
             password=password,
-            partition_id=partition_id,
-            partition_label=partition_label,
+            token_config_id=token_config_id,
+            token_serial_number=token_serial_number,
+            mkek_label=mkek_label,
+            hmac_label=hmac_label,
+            secret_store_id=secret_store_id,
+            library_path=library_path,
+            config_key_path=config_key_path,
+            skip_hsm_checks=skip_hsm_checks,
             debug=debug,
         )
-        create_hsm_partition(parsed_args)
+        token_config_create.create_token_config(parsed_args)
 
 
 class SimpleCryptoCommands:

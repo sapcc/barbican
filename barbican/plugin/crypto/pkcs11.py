@@ -12,6 +12,7 @@
 # limitations under the License.
 
 import collections
+import os
 import textwrap
 
 import cffi
@@ -513,9 +514,18 @@ class PKCS11(object):
             init_arg_pt = self.ffi.NULL
 
         rv = self.lib.C_Initialize(init_arg_pt)
+        LOG.info(
+            "C_Initialize returned rv=0x%x (lib_id=%s, cfg_env=%s)",
+            rv, id(self.lib), os.environ.get("CS_PKCS11_R3_CFG"),
+        )
         self._check_error(rv)
 
     def _get_slot_id(self, token_serial_number, token_labels, slot_id):
+        LOG.info(
+            "_get_slot_id: looking for token_serial=%s, token_labels=%s, "
+            "slot_id=%s (lib_id=%s)",
+            token_serial_number, token_labels, slot_id, id(self.lib),
+        )
         # First find out how many slots with tokens are available
         slots_ptr = self.ffi.new("CK_ULONG_PTR")
         rv = self.lib.C_GetSlotList(CK_TRUE, self.ffi.NULL, slots_ptr)
@@ -528,12 +538,12 @@ class PKCS11(object):
 
         # Gather details from each token
         tokens = list()
-        for id in slot_ids_ptr:
+        for sid in slot_ids_ptr:
             token_info_ptr = self.ffi.new("CK_TOKEN_INFO_PTR")
-            rv = self.lib.C_GetTokenInfo(id, token_info_ptr)
+            rv = self.lib.C_GetTokenInfo(sid, token_info_ptr)
             self._check_error(rv)
             token = Token(
-                id,
+                sid,
                 self.ffi.string(token_info_ptr.label).decode("UTF-8").strip(),
                 self.ffi.string(
                     token_info_ptr.serialNumber
@@ -544,6 +554,12 @@ class PKCS11(object):
                       token.label,
                       token.serial_number)
             tokens.append(token)
+
+        LOG.info(
+            "_get_slot_id: library reports %d slots: %s",
+            len(tokens),
+            [(t.slot_id, t.label, t.serial_number) for t in tokens],
+        )
 
         # Matching serial number gets highest priority
         if token_serial_number:
@@ -561,6 +577,11 @@ class PKCS11(object):
                         LOG.warning("Ignoring slot_id: %s from barbican.conf",
                                     slot_id)
                     return token.slot_id
+            LOG.warning(
+                "_get_slot_id: no slot matched token_serial=%s; "
+                "available serials=%s",
+                token_serial_number, [t.serial_number for t in tokens],
+            )
             raise ValueError("Token Serial Number not found.")
 
         # Label match is next, raises an error if there's not exactly one match
@@ -902,7 +923,9 @@ class PKCS11(object):
         self._check_error(rv)
 
     def finalize(self):
+        LOG.info("C_Finalize called (lib_id=%s)", id(self.lib))
         rv = self.lib.C_Finalize(self.ffi.NULL)
+        LOG.info("C_Finalize returned rv=0x%x", rv)
         try:
             self._check_error(rv)
         except exception.TrustwayProteccioException:

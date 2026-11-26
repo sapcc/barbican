@@ -13,6 +13,7 @@
 
 import base64
 import collections
+import os
 import threading
 import time
 
@@ -171,6 +172,11 @@ class P11CryptoPlugin(plugin.CryptoPluginBase):
         self.pkek_cache_limit = plugin_conf.pkek_cache_limit
 
         # Use specified or create new pkcs11 object
+        LOG.info(
+            "P11CryptoPlugin.__init__ creating initial PKCS11 "
+            "(cfg_env=%s, library_path=%s)",
+            os.environ.get("CS_PKCS11_R3_CFG"), self.library_path,
+        )
         self.pkcs11 = pkcs11 or self._create_pkcs11(ffi)
 
         self._configure_object_cache()
@@ -215,7 +221,12 @@ class P11CryptoPlugin(plugin.CryptoPluginBase):
                 self._reinitialize_pkcs11()
             return func(*args, **kwargs)
         except (exception.PKCS11Exception) as pe:
-            LOG.warning("Reinitializing PKCS#11 library: %s", pe)
+            LOG.warning(
+                "Reinitializing PKCS#11 library in %s(project=%s): %s",
+                getattr(func, "__name__", "?"),
+                kwargs.get("project_id", args[-1] if args else "?"),
+                pe,
+            )
             self._reinitialize_pkcs11()
             return func(*args, **kwargs)
 
@@ -366,6 +377,10 @@ class P11CryptoPlugin(plugin.CryptoPluginBase):
         )
 
     def _reinitialize_pkcs11(self):
+        LOG.info(
+            "_reinitialize_pkcs11 START (pkcs11_set=%s)",
+            self.pkcs11 is not None,
+        )
         if self.pkcs11 is not None:
             self.pkcs11.finalize()
         self.pkcs11 = None
@@ -381,6 +396,10 @@ class P11CryptoPlugin(plugin.CryptoPluginBase):
 
         self.pkcs11 = self._create_pkcs11()
         self._configure_object_cache()
+        LOG.info(
+            "_reinitialize_pkcs11 END (new slot_id=%s)",
+            getattr(self.pkcs11, "slot_id", None),
+        )
 
     def _get_session(self):
         return self.pkcs11.get_session()

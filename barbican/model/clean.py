@@ -58,7 +58,7 @@ def cleanup_unassociated_projects(
                                models.CertificateAuthority,
                                models.ProjectCertificateAuthority,
                                models.ProjectQuotas,
-                               models.HSMPartitionConfig]
+                               models.ProjectTokenConfig]
     children_names = map(lambda child: child.__name__, project_children_tables)
     LOG.debug("Children tables for Project table being checked: %s",
               str(children_names))
